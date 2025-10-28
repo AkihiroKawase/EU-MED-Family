@@ -1,0 +1,9 @@
+記事一覧DBで追加したタグ
+・Summary,テキスト,記事の要約用
+・External Link URL,URL,外部参照リンク用（canvas URLとは別）
+・Published At,日付,**（最重要）**公開日。新着順ソートに使います
+・Category,セレクト,**（重要）**カテゴリ分け用
+・Author User ID,テキスト,アプリ側のユーザーID（Firebase AuthのUID等）
+・Cover Image URL,URL,カバー画像のURL保存用 ※1
+・Language,セレクト,"(例: ja, en など)"
+・Pin,チェックボックス,ピン留め（固定表示）機能用
