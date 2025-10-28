@@ -1,0 +1,118 @@
+{
+  "project_info": {
+    "project_number": "186756439743",
+    "project_id": "myfirstappforhungarymed",
+    "storage_bucket": "myfirstappforhungarymed.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:186756439743:android:bf503f8db2d1a337b8300a",
+        "android_client_info": {
+          "package_name": "com.example.europemed_app_new"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "186756439743-ia7tt4lksr28hl1npf1rqc87epne2ug8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAClomI-cM8Wdr1SIIpb_-UtoveO1sPNE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "186756439743-ia7tt4lksr28hl1npf1rqc87epne2ug8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "186756439743-5po6u744gfp2v6r7tsq0cqp6huf04nbt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.europemedAppNew"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:186756439743:android:2b8f31f0cae8bfbbb8300a",
+        "android_client_info": {
+          "package_name": "com.example.europemedstudentcommunityapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "186756439743-ia7tt4lksr28hl1npf1rqc87epne2ug8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAClomI-cM8Wdr1SIIpb_-UtoveO1sPNE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "186756439743-ia7tt4lksr28hl1npf1rqc87epne2ug8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "186756439743-5po6u744gfp2v6r7tsq0cqp6huf04nbt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.europemedAppNew"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:186756439743:android:35e0acbebc47dd37b8300a",
+        "android_client_info": {
+          "package_name": "com.example.final_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "186756439743-ia7tt4lksr28hl1npf1rqc87epne2ug8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAClomI-cM8Wdr1SIIpb_-UtoveO1sPNE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "186756439743-ia7tt4lksr28hl1npf1rqc87epne2ug8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "186756439743-5po6u744gfp2v6r7tsq0cqp6huf04nbt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.europemedAppNew"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
