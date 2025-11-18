@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
+import 'screens/post_list_screen.dart'; 
 
 Future<void> main() async {
   // main関数はOKです
@@ -53,7 +54,20 @@ class MyHomePage extends StatelessWidget { // StatelessWidgetとして実装
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(10.0)))), //IputDecoration
             ), //TextField
-          ) //Padding
+          ),
+          const SizedBox(height: 24),
+
+          // ★ 投稿一覧へ遷移するボタン
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PostListScreen(),
+                ),
+              );
+            },
+            child: const Text("投稿一覧へ"),
+          ), //Padding
           // 他にもパスワード入力欄やボタンなどをここに追加できます
         ],
       ), // Column
