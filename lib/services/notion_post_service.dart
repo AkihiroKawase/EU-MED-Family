@@ -2,12 +2,14 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/post.dart';
+import '../env.dart';
 
 class NotionPostService {
   // TODO: あとで .env や dart-define で秘匿する
   static const String _notionApiBaseUrl = 'https://api.notion.com/v1';
-  static const String _notionApiKey = 'YOUR_NOTION_SECRET'; // secret_...
-  static const String _databaseId = 'YOUR_DATABASE_ID';
+    // ★ dart-define から受け取った値を使う
+  static const String _notionApiKey = notionApiKey;
+  static const String _databaseId = notionDatabaseId;
 
   static const Map<String, String> _headers = {
     'Authorization': 'Bearer $_notionApiKey',
