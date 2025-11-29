@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
-import 'profile_list_screen.dart';
-import 'login_screen.dart';
+import 'screens/profile_list_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/post_list_screen.dart'; 
 
 Future<void> main() async {

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/post.dart';
 import '../services/notion_post_service.dart';
+import '../widgets/app_bottom_nav.dart';
 import 'post_detail_screen.dart';
 import 'post_edit_screen.dart';
 
@@ -143,6 +144,7 @@ class _PostListScreenState extends State<PostListScreen> {
         onPressed: _goToNewPost,
         child: const Icon(Icons.add),
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: 0),
     );
   }
 }
