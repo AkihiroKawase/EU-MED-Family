@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../widgets/app_bottom_nav.dart';
 import 'profile_edit_screen.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
@@ -196,7 +197,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           );
         },
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: 1),
     );
+    
   }
 }
 
