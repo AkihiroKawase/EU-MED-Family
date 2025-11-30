@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../widgets/app_bottom_nav.dart';
+import 'post_list_screen.dart'; 
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({Key? key}) : super(key: key);
@@ -156,6 +158,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('保存しました')),
+        );
+
+        // ★ 投稿一覧画面へ遷移（元の編集画面は置き換え）
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => const PostListScreen(),
+          ),
         );
       }
     } catch (e) {
