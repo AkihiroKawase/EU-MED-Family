@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'profile_detail_screen.dart';
+import 'repositories/notion_repository.dart';
 
 class ProfileListScreen extends StatefulWidget {
   const ProfileListScreen({Key? key}) : super(key: key);
@@ -16,11 +17,15 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   String? _selectedCountry;
   String? _selectedSchool;
   String? _selectedGrade;
+  bool _isSyncingNotion = false;
 
   // 絞り込み候補
   final List<String> _countries = ['指定なし', 'ハンガリー', 'チェコ', 'スロバキア', 'ポーランド', '日本', 'アメリカ'];
   final List<String> _schools = ['指定なし', 'デブレツェン大学', 'ペーチ大学', 'セゲド大学', 'センメルワイス大学'];
   final List<String> _grades = ['指定なし', '1年生', '2年生', '3年生', '4年生', '5年生', '6年生'];
+  
+  // Repository
+  final NotionRepository _notionRepository = NotionRepository();
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getUsersStream() {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('users');
@@ -74,6 +79,66 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('ログアウトに失敗しました: $e')),
         );
+      }
+    }
+  }
+
+  Future<void> _syncNotionUser() async {
+    setState(() {
+      _isSyncingNotion = true;
+    });
+
+    try {
+      final notionUserId = await _notionRepository.syncNotionUser();
+
+      if (mounted) {
+        if (notionUserId != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Notion連携が完了しました'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('連携できませんでした'),
+              content: const Text(
+                'Notionの招待メールを確認してください。\n\n'
+                'メールアドレスが一致するNotionユーザーが見つかりませんでした。',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('エラー'),
+            content: Text('連携中にエラーが発生しました: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSyncingNotion = false;
+        });
       }
     }
   }
