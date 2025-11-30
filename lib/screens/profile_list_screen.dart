@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../widgets/app_bottom_nav.dart';
 import 'profile_detail_screen.dart';
 import 'repositories/notion_repository.dart';
 
@@ -361,11 +362,7 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _navigateToMyProfile,
-        tooltip: 'マイプロフィール',
-        child: const Icon(Icons.person),
-      ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: 2),
     );
   }
 
