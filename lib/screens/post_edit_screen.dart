@@ -17,9 +17,13 @@ class _PostEditScreenState extends State<PostEditScreen> {
   final _notionService = NotionPostService();
 
   late TextEditingController _titleController;
-  late TextEditingController _pdfUrlController;
-  late TextEditingController _commentController;
-  late TextEditingController _hashtagsController;
+  late TextEditingController _canvaUrlController;
+  late TextEditingController _categoryController;
+  late TextEditingController _statusController;
+
+  // 1st check / Check②
+  late bool _firstCheck;
+  late bool _secondCheck;
 
   bool get _isEdit => widget.post != null;
 
@@ -28,42 +32,60 @@ class _PostEditScreenState extends State<PostEditScreen> {
     super.initState();
     _titleController =
         TextEditingController(text: widget.post?.title ?? '');
-    _pdfUrlController =
-        TextEditingController(text: widget.post?.pdfUrl ?? '');
-    _commentController =
-        TextEditingController(text: widget.post?.comment ?? '');
-    _hashtagsController = TextEditingController(
-      text: widget.post?.hashtags.join(' ') ?? '',
+    _canvaUrlController =
+        TextEditingController(text: widget.post?.canvaUrl ?? '');
+    _categoryController = TextEditingController(
+      text: widget.post?.categories.join(' ') ?? '',
     );
+    _statusController =
+        TextEditingController(text: widget.post?.status ?? '');
+
+    _firstCheck = widget.post?.firstCheck ?? false;
+    _secondCheck = widget.post?.secondCheck ?? false;
   }
 
   @override
   void dispose() {
     _titleController.dispose();
-    _pdfUrlController.dispose();
-    _commentController.dispose();
-    _hashtagsController.dispose();
+    _canvaUrlController.dispose();
+    _categoryController.dispose();
+    _statusController.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final hashtags = _hashtagsController.text
+    // カテゴリはスペース区切りで複数入力可能にしておく
+    final categories = _categoryController.text
         .split(RegExp(r'\s+'))
-        .map((e) => e.replaceFirst('#', ''))
         .where((e) => e.isNotEmpty)
         .toList();
 
+    final title = _titleController.text.trim();
+    final canvaUrlText = _canvaUrlController.text.trim();
+    final statusText = _statusController.text.trim();
+
     final post = Post(
-      id: widget.post?.id ?? '',
-      title: _titleController.text.trim(),
-      pdfUrl: _pdfUrlController.text.trim(),
-      comment: _commentController.text.trim(),
-      hashtags: hashtags,
+      id: widget.post?.id ?? '', // 新規時は空文字で OK（upsert 側で create する想定）
+      title: title,
+      firstCheck: _firstCheck,
+      canvaUrl: canvaUrlText.isEmpty ? null : canvaUrlText,
+      categories: categories,
+      secondCheck: _secondCheck,
+      // ここはアプリ側では編集しない前提で、既存値を引き継ぐ
+      secondCheckAssignees:
+          widget.post?.secondCheckAssignees ?? <String>[],
+      status: statusText.isEmpty ? null : statusText,
+      fileUrls: widget.post?.fileUrls ?? <String>[],
+      authors: widget.post?.authors ?? <String>[],
+      createdTime: widget.post?.createdTime,
+      lastEditedTime: widget.post?.lastEditedTime,
     );
 
     try {
+      // NotionPostService 側の upsertPost は
+      // 新しい Post モデルに合わせて実装してある前提
       await _notionService.upsertPost(post, isUpdate: _isEdit);
       if (mounted) {
         Navigator.of(context).pop(true); // 保存成功を親に伝える
@@ -94,43 +116,71 @@ class _PostEditScreenState extends State<PostEditScreen> {
           key: _formKey,
           child: ListView(
             children: [
+              // タイトル
               TextFormField(
                 controller: _titleController,
                 decoration: const InputDecoration(
-                  labelText: '記事名',
+                  labelText: 'タイトル',
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return '記事名を入力してください';
+                    return 'タイトルを入力してください';
                   }
                   return null;
                 },
               ),
               const SizedBox(height: 16),
+
+              // Canva URL
               TextFormField(
-                controller: _pdfUrlController,
+                controller: _canvaUrlController,
                 decoration: const InputDecoration(
-                  labelText: 'PDF URL',
+                  labelText: 'Canva URL',
                   hintText: 'https://...',
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Category（スペース区切りで複数）
               TextFormField(
-                controller: _commentController,
+                controller: _categoryController,
                 decoration: const InputDecoration(
-                  labelText: 'コメント',
+                  labelText: 'Category（スペース区切りで複数可）',
+                  hintText: '例: 医療 デザイン ...',
                 ),
-                maxLines: 3,
               ),
               const SizedBox(height: 16),
+
+              // ステータス
               TextFormField(
-                controller: _hashtagsController,
+                controller: _statusController,
                 decoration: const InputDecoration(
-                  labelText: 'ハッシュタグ（スペース区切り, #なしでもOK）',
-                  hintText: 'flutter notion pdf ...',
+                  labelText: 'ステータス',
+                  hintText: '例: 未着手 / チェック中 / 完了',
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // 1st check
+              SwitchListTile(
+                title: const Text('1st check'),
+                value: _firstCheck,
+                onChanged: (v) {
+                  setState(() => _firstCheck = v);
+                },
+              ),
+
+              // Check ②
+              SwitchListTile(
+                title: const Text('Check ②'),
+                value: _secondCheck,
+                onChanged: (v) {
+                  setState(() => _secondCheck = v);
+                },
+              ),
+
               const SizedBox(height: 24),
+
               ElevatedButton.icon(
                 onPressed: _save,
                 icon: const Icon(Icons.check),

@@ -60,48 +60,156 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             );
           }
 
+          if (!snapshot.hasData) {
+            return const Center(child: Text('データが見つかりませんでした'));
+          }
+
           final post = snapshot.data!;
-          final tagText = post.hashtags.isNotEmpty
-              ? '#${post.hashtags.join(' #')}'
-              : '';
+          final statusText = post.status ?? '';
+          final categoryText = post.firstCategory ?? '';
+          final authorText = post.firstAuthor ?? '';
+          final created = post.createdTime;
+          final updated = post.lastEditedTime;
 
           return Padding(
             padding: const EdgeInsets.all(16),
             child: ListView(
               children: [
+                // タイトル
                 Text(
                   post.title.isEmpty ? '(無題)' : post.title,
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
-                if (tagText.isNotEmpty)
+
+                // ステータス & カテゴリ
+                if (statusText.isNotEmpty || categoryText.isNotEmpty)
                   Text(
-                    tagText,
+                    [
+                      if (statusText.isNotEmpty) 'ステータス: $statusText',
+                      if (categoryText.isNotEmpty) 'カテゴリ: $categoryText',
+                    ].join(' / '),
+                    style: const TextStyle(fontSize: 13),
+                  ),
+
+                // 著者
+                if (authorText.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '著者: $authorText',
                     style: const TextStyle(
                       fontSize: 12,
                       color: Colors.blueGrey,
                     ),
                   ),
-                const SizedBox(height: 16),
+                ],
+
+                // 日付
+                if (created != null || updated != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    [
+                      if (created != null)
+                        '作成: ${created.toLocal().toString().split(".").first}',
+                      if (updated != null)
+                        '更新: ${updated.toLocal().toString().split(".").first}',
+                    ].join(' / '),
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                // Canva URL
                 const Text(
-                  'コメント',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Text(post.comment),
-                const SizedBox(height: 16),
-                const Text(
-                  'PDF URL',
+                  'Canva URL',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  post.pdfUrl.isEmpty ? '未登録' : post.pdfUrl,
-                  style: const TextStyle(
-                    decoration: TextDecoration.underline,
+                  (post.canvaUrl == null || post.canvaUrl!.isEmpty)
+                      ? '未登録'
+                      : post.canvaUrl!,
+                  style: TextStyle(
+                    decoration: (post.canvaUrl == null ||
+                            post.canvaUrl!.isEmpty)
+                        ? TextDecoration.none
+                        : TextDecoration.underline,
+                    color: (post.canvaUrl == null ||
+                            post.canvaUrl!.isEmpty)
+                        ? null
+                        : Colors.blue,
                   ),
                 ),
+
                 const SizedBox(height: 24),
+
+                // チェック状況
+                const Text(
+                  'チェック状況',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      post.firstCheck
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('1st check'),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      post.secondCheck
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('Check ②'),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                // ファイル & メディア
+                const Text(
+                  'ファイル & メディア',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                if (post.fileUrls.isEmpty)
+                  const Text('ファイルは登録されていません')
+                else
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (int i = 0; i < post.fileUrls.length; i++) ...[
+                        Text(
+                          'ファイル ${i + 1}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          post.fileUrls[i],
+                          style: const TextStyle(
+                            fontSize: 13,
+                            decoration: TextDecoration.underline,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ]
+                    ],
+                  ),
+
+                const SizedBox(height: 24),
+
                 ElevatedButton.icon(
                   onPressed: () => _goToEdit(post),
                   icon: const Icon(Icons.edit),
