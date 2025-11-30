@@ -1,120 +1,227 @@
 // lib/services/notion_post_service.dart
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
-import '../models/post.dart';
+
 import '../env.dart';
+import '../models/post.dart';
 
+/// Notion の DB（NOTION_DATABASE_ID）とやり取りするサービス
 class NotionPostService {
-  // TODO: あとで .env や dart-define で秘匿する
-  static const String _notionApiBaseUrl = 'https://api.notion.com/v1';
-    // ★ dart-define から受け取った値を使う
-  static const String _notionApiKey = notionApiKey;
-  static const String _databaseId = notionDatabaseId;
+  static const String _baseUrl = 'https://api.notion.com/v1';
+  static const String _notionVersion = '2022-06-28';
 
-  static const Map<String, String> _headers = {
-    'Authorization': 'Bearer $_notionApiKey',
-    'Notion-Version': '2022-06-28',
-    'Content-Type': 'application/json',
-  };
+  final String _apiKey;
+  final String _databaseId;
 
-  /// 投稿一覧取得
+  NotionPostService({
+    String? apiKey,
+    String? databaseId,
+  })  : _apiKey = apiKey ?? notionApiKey,
+        _databaseId = databaseId ?? notionDatabaseId;
+
+  Map<String, String> get _headers => {
+        'Authorization': 'Bearer $_apiKey',
+        'Notion-Version': _notionVersion,
+        'Content-Type': 'application/json',
+      };
+
+  // ---------------------------------------------------------------------------
+  // 一覧取得
+  // ---------------------------------------------------------------------------
+
   Future<List<Post>> fetchPosts() async {
-    final url = Uri.parse('$_notionApiBaseUrl/databases/$_databaseId/query');
-
-    final res = await http.post(url, headers: _headers);
-    if (res.statusCode != 200) {
-      throw Exception('Failed to fetch posts from Notion: ${res.body}');
+    if (_apiKey.isEmpty || _databaseId.isEmpty) {
+      throw Exception(
+          'Notion API key or database ID is empty. dart-define を確認してください。');
     }
 
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    final results = data['results'] as List<dynamic>;
+    final uri = Uri.parse('$_baseUrl/databases/$_databaseId/query');
 
-    return results.map((page) => _pageToPost(page)).toList();
+    final body = jsonEncode({
+      'sorts': [
+        {
+          'timestamp': 'created_time',
+          'direction': 'descending',
+        }
+      ],
+    });
+
+    final res = await http.post(
+      uri,
+      headers: _headers,
+      body: body,
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception(
+          'Failed to fetch posts from Notion: ${res.statusCode} ${res.body}');
+    }
+
+    final Map<String, dynamic> json = jsonDecode(res.body);
+    final List<dynamic> results = json['results'] as List<dynamic>;
+
+    return results
+        .map((pageJson) =>
+            Post.fromNotionPage(pageJson as Map<String, dynamic>))
+        .toList();
   }
 
-  /// 1件取得（詳細用）
+  // ---------------------------------------------------------------------------
+  // 作成 / 更新（upsert）
+  // ---------------------------------------------------------------------------
+
+  /// Post を作成または更新する。
+  ///
+  /// - [isUpdate] が true かつ post.id が空でない → PATCH /pages/{id}
+  /// - それ以外 → POST /pages
+  Future<void> upsertPost(
+    Post post, {
+    required bool isUpdate,
+  }) async {
+    if (_apiKey.isEmpty || _databaseId.isEmpty) {
+      throw Exception(
+          'Notion API key or database ID is empty. dart-define を確認してください。');
+    }
+
+    final properties = _buildProperties(post);
+
+    if (isUpdate && post.id.isNotEmpty) {
+      // 更新
+      final uri = Uri.parse('$_baseUrl/pages/${post.id}');
+      final body = jsonEncode({
+        'properties': properties,
+      });
+
+      final res = await http.patch(
+        uri,
+        headers: _headers,
+        body: body,
+      );
+
+      if (res.statusCode != 200) {
+        throw Exception(
+            'Failed to update post in Notion: ${res.statusCode} ${res.body}');
+      }
+    } else {
+      // 新規作成
+      final uri = Uri.parse('$_baseUrl/pages');
+      final body = jsonEncode({
+        'parent': {'database_id': _databaseId},
+        'properties': properties,
+      });
+
+      final res = await http.post(
+        uri,
+        headers: _headers,
+        body: body,
+      );
+
+      if (res.statusCode != 200) {
+        throw Exception(
+            'Failed to create post in Notion: ${res.statusCode} ${res.body}');
+      }
+    }
+  }
+
+    /// 単一のページ(Post) を取得
   Future<Post> fetchPost(String pageId) async {
-    final url = Uri.parse('$_notionApiBaseUrl/pages/$pageId');
+    final uri = Uri.parse('$_baseUrl/pages/$pageId');
 
-    final res = await http.get(url, headers: _headers);
+    final res = await http.get(
+      uri,
+      headers: _headers,
+    );
+
     if (res.statusCode != 200) {
-      throw Exception('Failed to fetch post: ${res.body}');
+      throw Exception(
+          'Failed to fetch post from Notion: ${res.statusCode} ${res.body}');
     }
 
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return _pageToPost(data);
+    final Map<String, dynamic> json = jsonDecode(res.body);
+
+    return Post.fromNotionPage(json);
   }
 
-  /// 新規作成 or 更新
-  Future<void> upsertPost(Post post, {bool isUpdate = false}) async {
-    final body = {
-      'parent': {'database_id': _databaseId},
-      'properties': {
-        'Title': {
-          'title': [
-            {'text': {'content': post.title}}
-          ]
-        },
-        'PDF': {'url': post.pdfUrl},
-        'Comment': {
-          'rich_text': [
-            {'text': {'content': post.comment}}
-          ]
-        },
-        'Tags': {
-          'multi_select': post.hashtags
-              .map((tag) => {
-                    'name': tag,
-                  })
-              .toList()
-        },
+  // ---------------------------------------------------------------------------
+  // Notion プロパティのマッピング
+  // ---------------------------------------------------------------------------
+
+  /// Post → Notion properties JSON
+  ///
+  /// Notion DB 側のプロパティ名と 1:1 で対応させています。
+  ///
+  /// - タイトル (title)
+  /// - 1st check (checkbox)
+  /// - Canva URL (url)
+  /// - Category (multi_select)
+  /// - Check ② (checkbox)
+  /// - ステータス (status)
+  Map<String, dynamic> _buildProperties(Post post) {
+    final Map<String, dynamic> props = {
+      // タイトル
+      'タイトル': {
+        'title': [
+          {
+            'text': {'content': post.title}
+          }
+        ],
+      },
+
+      // 1st check
+      '1st check': {
+        'checkbox': post.firstCheck,
+      },
+
+      // Check ②
+      'Check ②': {
+        'checkbox': post.secondCheck,
       },
     };
 
-    http.Response res;
-
-    if (isUpdate) {
-      final url = Uri.parse('$_notionApiBaseUrl/pages/${post.id}');
-      res = await http.patch(url, headers: _headers, body: jsonEncode(body));
+    // Canva URL（空文字なら null 扱い）
+    if (post.canvaUrl != null && post.canvaUrl!.isNotEmpty) {
+      props['Canva URL'] = {
+        'url': post.canvaUrl,
+      };
     } else {
-      final url = Uri.parse('$_notionApiBaseUrl/pages');
-      res = await http.post(url, headers: _headers, body: jsonEncode(body));
+      props['Canva URL'] = {
+        'url': null,
+      };
     }
 
-    if (res.statusCode != 200) {
-      throw Exception('Failed to upsert post: ${res.body}');
+    // Category（multi_select）
+    if (post.categories.isNotEmpty) {
+      props['Category'] = {
+        'multi_select': post.categories
+            .map((name) => {
+                  'name': name,
+                })
+            .toList(),
+      };
+    } else {
+      props['Category'] = {
+        'multi_select': <dynamic>[],
+      };
     }
-  }
 
-  /// Notionのpage JSON → Postモデル変換
-  Post _pageToPost(Map<String, dynamic> page) {
-    final properties = page['properties'] as Map<String, dynamic>;
+    // ステータス（status）
+    if (post.status != null && post.status!.isNotEmpty) {
+      props['ステータス'] = {
+        'status': {
+          'name': post.status,
+        },
+      };
+    } else {
+      // ステータスをリセットしたい場合は null にする
+      props['ステータス'] = {
+        'status': null,
+      };
+    }
 
-    final titleProp = properties['Title']?['title'] as List<dynamic>? ?? [];
-    final titleText =
-        titleProp.isNotEmpty ? (titleProp.first['plain_text'] ?? '') : '';
+    // 今回は authors / secondCheckAssignees / fileUrls は編集しない前提。
+    // もし編集したくなったら、ここに people / files のマッピングを追加。
 
-    final pdfUrl = properties['PDF']?['url'] as String? ?? '';
-
-    final commentProp =
-        properties['Comment']?['rich_text'] as List<dynamic>? ?? [];
-    final commentText = commentProp.isNotEmpty
-        ? (commentProp.first['plain_text'] as String? ?? '')
-        : '';
-
-    final tagsProp =
-        properties['Tags']?['multi_select'] as List<dynamic>? ?? [];
-    final tags = tagsProp
-        .map((e) => e['name'] as String? ?? '')
-        .where((e) => e.isNotEmpty)
-        .toList();
-
-    return Post(
-      id: page['id'] as String,
-      title: titleText,
-      pdfUrl: pdfUrl,
-      comment: commentText,
-      hashtags: tags,
-    );
+    return props;
   }
 }
