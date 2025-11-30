@@ -3,19 +3,21 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
+import 'screens/profile_list_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/post_list_screen.dart'; 
 
 Future<void> main() async {
-  // main関数はOKです
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
   runApp(const MyApp());
 }
 
-// MyAppクラスもOKです
 class MyApp extends StatelessWidget {
-  const MyApp({super.key}); // コンストラクタに super.key を追加すると良いでしょう
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +25,27 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.teal,
       ),
-      home: MyHomePage(), // constを外すか、MyHomePageのコンストラクタをconstにする
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          // ロード中
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+
+          // ログイン中
+          if (snapshot.hasData) {
+            return const ProfileListScreen();
+          }
+
+          // ログアウト状態
+          return const LoginScreen();
+        },
+      ),
     );
   }
 }
@@ -53,7 +75,20 @@ class MyHomePage extends StatelessWidget { // StatelessWidgetとして実装
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(10.0)))), //IputDecoration
             ), //TextField
-          ) //Padding
+          ),
+          const SizedBox(height: 24),
+
+          // ★ 投稿一覧へ遷移するボタン
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PostListScreen(),
+                ),
+              );
+            },
+            child: const Text("投稿一覧へ"),
+          ), //Padding
           // 他にもパスワード入力欄やボタンなどをここに追加できます
         ],
       ), // Column
