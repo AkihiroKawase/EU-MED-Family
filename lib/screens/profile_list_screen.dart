@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'profile_detail_screen.dart';
+import '../repositories/notion_repository.dart';
 
 class ProfileListScreen extends StatefulWidget {
   const ProfileListScreen({Key? key}) : super(key: key);
