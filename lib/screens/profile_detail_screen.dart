@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'profile_edit_screen.dart';
 
@@ -18,6 +19,7 @@ class ProfileDetailScreen extends StatefulWidget {
 
 class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   int _refreshKey = 0;
+  bool _isSyncingNotion = false;
 
   Future<DocumentSnapshot<Map<String, dynamic>>> _fetchUserProfile() {
     return FirebaseFirestore.instance
@@ -37,6 +39,57 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     setState(() {
       _refreshKey++;
     });
+  }
+
+  Future<void> _syncNotion() async {
+    setState(() {
+      _isSyncingNotion = true;
+    });
+
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable('syncNotionUser');
+      final result = await callable.call();
+      
+      final data = result.data as Map<String, dynamic>;
+      final success = data['success'] as bool;
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Notionとの連携が完了しました'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          // 画面を再描画してステータスを更新
+          setState(() {
+            _refreshKey++;
+          });
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('連携に失敗しました。Notionの招待メールを確認してください'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('エラーが発生しました: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSyncingNotion = false;
+        });
+      }
+    }
   }
 
   @override
@@ -92,6 +145,8 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           final canvaUrl = data['canvaUrl'] as String? ?? '';
           final futureDream = data['futureDream'] as String? ?? '';
           final futureCountry = data['futureCountry'] as String? ?? '';
+          final notionUserId = data['notionUserId'] as String?;
+          final isNotionLinked = notionUserId != null && notionUserId.isNotEmpty;
 
           return SingleChildScrollView(
             child: Column(
@@ -191,6 +246,84 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 24.0),
+                // Notion連携セクション（自分のプロフィールの場合のみ表示）
+                if (isOwnProfile)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Notion連携ステータス',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 12.0),
+                          Row(
+                            children: [
+                              Icon(
+                                isNotionLinked ? Icons.check_circle : Icons.warning,
+                                color: isNotionLinked ? Colors.green : Colors.orange,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8.0),
+                              Text(
+                                isNotionLinked ? '連携済み ✅' : '未連携 ⚠️',
+                                style: TextStyle(
+                                  color: isNotionLinked ? Colors.green : Colors.orange,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12.0),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: isNotionLinked || _isSyncingNotion
+                                  ? null
+                                  : _syncNotion,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isNotionLinked
+                                    ? Colors.grey[300]
+                                    : Colors.teal,
+                                foregroundColor: isNotionLinked
+                                    ? Colors.grey[600]
+                                    : Colors.white,
+                              ),
+                              child: _isSyncingNotion
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white,
+                                        ),
+                                      ),
+                                    )
+                                  : Text(
+                                      isNotionLinked
+                                          ? '連携済み'
+                                          : 'Notionと同期する',
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 24.0),
               ],
             ),
