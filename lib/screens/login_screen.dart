@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'register_screen.dart';
-import 'post_list_screen.dart'; // パスはあなたの構成に合わせて
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -37,14 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-      // ★ ここでログイン成功しているので画面遷移させる
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const PostListScreen(),
-        ),
-      );
-      // 成功時は何もしない（main.dartのStreamBuilderが検知する）
+      // 成功時は何もしない（main.dartのStreamBuilderが検知して自動で画面遷移する）
     } on FirebaseAuthException catch (e) {
       String errorMessage = 'ログインに失敗しました';
       
