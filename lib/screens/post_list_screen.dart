@@ -67,7 +67,7 @@ class _PostListScreenState extends State<PostListScreen> {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return ListView(
-                children: [
+                children: const [
                   SizedBox(
                     height: 200,
                     child: Center(child: CircularProgressIndicator()),
@@ -107,24 +107,38 @@ class _PostListScreenState extends State<PostListScreen> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final post = posts[index];
-                final tagText = post.hashtags.isNotEmpty
-                    ? '#${post.hashtags.join(' #')}'
-                    : '';
+
+                final statusText = post.status ?? '';
+                final categoryText = post.firstCategory ?? '';
+                final authorText = post.firstAuthor ?? '';
+
+                // 1行目用のテキスト（ステータス / カテゴリ）
+                String metaLine = '';
+                if (statusText.isNotEmpty) {
+                  metaLine += 'ステータス: $statusText';
+                }
+                if (categoryText.isNotEmpty) {
+                  if (metaLine.isNotEmpty) metaLine += ' / ';
+                  metaLine += 'カテゴリ: $categoryText';
+                }
 
                 return ListTile(
                   title: Text(post.title.isEmpty ? '(無題)' : post.title),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (post.comment.isNotEmpty)
+                      if (metaLine.isNotEmpty)
                         Text(
-                          post.comment,
+                          metaLine,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
                         ),
-                      if (tagText.isNotEmpty)
+                      if (authorText.isNotEmpty)
                         Text(
-                          tagText,
+                          '著者: $authorText',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
                             color: Colors.blueGrey,
