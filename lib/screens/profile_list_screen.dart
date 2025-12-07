@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'profile_detail_screen.dart';
+import 'login_screen.dart';
+import '../repositories/notion_repository.dart';
 
 class ProfileListScreen extends StatefulWidget {
   const ProfileListScreen({Key? key}) : super(key: key);
@@ -17,13 +19,22 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   String? _selectedCountry;
   String? _selectedSchool;
   String? _selectedGrade;
+  bool _isSyncingNotion = false;
 
   // 絞り込み候補
   final List<String> _countries = ['指定なし', 'ハンガリー', 'チェコ', 'スロバキア', 'ポーランド', '日本', 'アメリカ'];
   final List<String> _schools = ['指定なし', 'デブレツェン大学', 'ペーチ大学', 'セゲド大学', 'センメルワイス大学'];
   final List<String> _grades = ['指定なし', '1年生', '2年生', '3年生', '4年生', '5年生', '6年生'];
+  
+  // Repository
+  final NotionRepository _notionRepository = NotionRepository();
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getUsersStream() {
+    // 未認証の場合は空のStreamを返す（ログアウト時のpermission-deniedエラー防止）
+    if (FirebaseAuth.instance.currentUser == null) {
+      return const Stream.empty();
+    }
+    
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('users');
 
     // 絞り込み条件を追加
@@ -70,11 +81,77 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('ログアウトに失敗しました: $e')),
         );
+      }
+    }
+  }
+
+  Future<void> _syncNotionUser() async {
+    setState(() {
+      _isSyncingNotion = true;
+    });
+
+    try {
+      final notionUserId = await _notionRepository.syncNotionUser();
+
+      if (mounted) {
+        if (notionUserId != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Notion連携が完了しました'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('連携できませんでした'),
+              content: const Text(
+                'Notionの招待メールを確認してください。\n\n'
+                'メールアドレスが一致するNotionユーザーが見つかりませんでした。',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('エラー'),
+            content: Text('連携中にエラーが発生しました: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSyncingNotion = false;
+        });
       }
     }
   }
@@ -207,6 +284,14 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
                 // エラー時
                 if (snapshot.hasError) {
                   final errorMessage = snapshot.error.toString();
+                  
+                  // ログアウト中のpermission-deniedエラーは無視（ローディング表示）
+                  if (errorMessage.contains('permission-denied')) {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+                  
                   final needsIndex = errorMessage.contains('index') || 
                                      errorMessage.contains('requires an index');
                   
