@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'profile_detail_screen.dart';
+import 'login_screen.dart';
 import '../repositories/notion_repository.dart';
 
 class ProfileListScreen extends StatefulWidget {
@@ -80,6 +81,12 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
