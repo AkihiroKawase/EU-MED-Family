@@ -29,6 +29,11 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   final NotionRepository _notionRepository = NotionRepository();
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getUsersStream() {
+    // 未認証の場合は空のStreamを返す（ログアウト時のpermission-deniedエラー防止）
+    if (FirebaseAuth.instance.currentUser == null) {
+      return const Stream.empty();
+    }
+    
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('users');
 
     // 絞り込み条件を追加
@@ -272,6 +277,14 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
                 // エラー時
                 if (snapshot.hasError) {
                   final errorMessage = snapshot.error.toString();
+                  
+                  // ログアウト中のpermission-deniedエラーは無視（ローディング表示）
+                  if (errorMessage.contains('permission-denied')) {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+                  
                   final needsIndex = errorMessage.contains('index') || 
                                      errorMessage.contains('requires an index');
                   
