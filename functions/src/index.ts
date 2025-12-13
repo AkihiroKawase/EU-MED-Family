@@ -172,10 +172,10 @@ function buildNotionProperties(post: UpsertPostInput) {
     };
   }
 
-  // Category
-  if (post.categories !== undefined) {
+  // Category (select型: 配列の最初の要素のみを使用)
+  if (post.categories !== undefined && post.categories.length > 0) {
     props["Category"] = {
-      multi_select: post.categories.map((name) => ({name})),
+      select: {name: post.categories[0]},
     };
   }
 
@@ -392,7 +392,10 @@ export const upsertPost = onCall(async (request) => {
       };
     }
   } catch (error) {
+    // Notion API エラーの詳細をログに出力
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Error upserting post to Notion:", error);
-    throw new HttpsError("internal", "Failed to upsert post to Notion.");
+    console.error("Error details:", errorMessage);
+    throw new HttpsError("internal", `Failed to upsert post to Notion: ${errorMessage}`);
   }
 });
