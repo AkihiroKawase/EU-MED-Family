@@ -46,10 +46,10 @@ class Post {
     this.canvaUrl,
     required this.categories,
     required this.secondCheck,
-    required this.secondCheckAssignees,
+    this.secondCheckAssignees = const [],
     this.status,
-    required this.fileUrls,
-    required this.authors,
+    this.fileUrls = const [],
+    this.authors = const [],
     this.createdTime,
     this.lastEditedTime,
   });
@@ -60,6 +60,41 @@ class Post {
 
   /// 著者の先頭だけ使いたい場合の簡易 getter
   String? get firstAuthor => authors.isNotEmpty ? authors.first : null;
+
+  /// Cloud Functions から返却される整形済み JSON を Post に変換
+  factory Post.fromJson(Map<String, dynamic> json) {
+    return Post(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      firstCheck: json['firstCheck'] as bool? ?? false,
+      secondCheck: json['secondCheck'] as bool? ?? false,
+      canvaUrl: json['canvaUrl'] as String?,
+      categories: (json['categories'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
+      status: json['status'] as String?,
+      createdTime: json['createdTime'] != null
+          ? DateTime.tryParse(json['createdTime'] as String)
+          : null,
+      lastEditedTime: json['lastEditedTime'] != null
+          ? DateTime.tryParse(json['lastEditedTime'] as String)
+          : null,
+    );
+  }
+
+  /// Post を JSON (Map) に変換（Cloud Functions への送信用）
+  Map<String, dynamic> toJson() {
+    return {
+      if (id.isNotEmpty) 'id': id,
+      'title': title,
+      'firstCheck': firstCheck,
+      'secondCheck': secondCheck,
+      'canvaUrl': canvaUrl,
+      'categories': categories,
+      'status': status,
+    };
+  }
 
   /// Notion の「ページ JSON」から Post へ変換
   factory Post.fromNotionPage(Map<String, dynamic> page) {
