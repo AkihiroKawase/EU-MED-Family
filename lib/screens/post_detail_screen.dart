@@ -1,5 +1,7 @@
 // lib/screens/post_detail_screen.dart
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../models/post.dart';
 import '../services/notion_post_service.dart';
 import 'post_edit_screen.dart';
@@ -7,10 +9,7 @@ import 'post_edit_screen.dart';
 class PostDetailScreen extends StatefulWidget {
   final String postId;
 
-  const PostDetailScreen({
-    super.key,
-    required this.postId,
-  });
+  const PostDetailScreen({super.key, required this.postId});
 
   @override
   State<PostDetailScreen> createState() => _PostDetailScreenState();
@@ -26,50 +25,61 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     _futurePost = _notionService.fetchPost(widget.postId);
   }
 
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('リンクを開けませんでした')),
+      );
+    }
+  }
+
+  String _fileNameFromUrl(String url) {
+    final uri = Uri.parse(url);
+    final last = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'file';
+    final decoded = Uri.decodeComponent(last);
+    return decoded.trim().isEmpty ? 'ファイル' : decoded;
+  }
+
   void _goToEdit(Post post) async {
     final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PostEditScreen(post: post),
-      ),
+      MaterialPageRoute(builder: (_) => PostEditScreen(post: post)),
     );
 
     if (result == true) {
       setState(() {
         _futurePost = _notionService.fetchPost(widget.postId);
       });
-      Navigator.of(context).pop(true); // 一覧側に「更新されたよ」と伝える
+      if (mounted) Navigator.of(context).pop(true);
     }
   }
+
+  Widget _sectionTitle(String text) => Padding(
+        padding: const EdgeInsets.only(top: 16, bottom: 8),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold)),
+      );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('投稿詳細'),
-      ),
+      appBar: AppBar(title: const Text('投稿詳細')),
       body: FutureBuilder<Post>(
         future: _futurePost,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (snapshot.hasError) {
-            return Center(
-              child: Text('エラーが発生しました: ${snapshot.error}'),
-            );
-          }
-
-          if (!snapshot.hasData) {
-            return const Center(child: Text('データが見つかりませんでした'));
+            return Center(child: Text('エラー: ${snapshot.error}'));
           }
 
           final post = snapshot.data!;
-          final statusText = post.status ?? '';
-          final categoryText = post.firstCategory ?? '';
-          final authorText = post.firstAuthor ?? '';
-          final created = post.createdTime;
-          final updated = post.lastEditedTime;
+
+          // まずここで値が入っているか確認（デバッグ用）
+          debugPrint('DETAIL post: '
+              'cats=${post.categories}, authors=${post.authors}, '
+              'files=${post.fileUrls}, status=${post.status}, canva=${post.canvaUrl}');
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -80,132 +90,77 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   post.title.isEmpty ? '(無題)' : post.title,
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
-                const SizedBox(height: 8),
 
-                // ステータス & カテゴリ
-                if (statusText.isNotEmpty || categoryText.isNotEmpty)
-                  Text(
-                    [
-                      if (statusText.isNotEmpty) 'ステータス: $statusText',
-                      if (categoryText.isNotEmpty) 'カテゴリ: $categoryText',
-                    ].join(' / '),
-                    style: const TextStyle(fontSize: 13),
+                // ステータス（あれば）
+                if ((post.status ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        Chip(
+                          label: Text(post.status!),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // カテゴリー
+                _sectionTitle('カテゴリー'),
+                if (post.categories.isEmpty)
+                  const Text('未設定')
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: post.categories
+                        .map((c) => Chip(label: Text(c)))
+                        .toList(),
                   ),
 
                 // 著者
-                if (authorText.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '著者: $authorText',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.blueGrey,
-                    ),
+                _sectionTitle('著者'),
+                if (post.authors.isEmpty)
+                  const Text('未設定')
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children:
+                        post.authors.map((a) => Chip(label: Text(a))).toList(),
                   ),
-                ],
 
-                // 日付
-                if (created != null || updated != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    [
-                      if (created != null)
-                        '作成: ${created.toLocal().toString().split(".").first}',
-                      if (updated != null)
-                        '更新: ${updated.toLocal().toString().split(".").first}',
-                    ].join(' / '),
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ],
-
-                const SizedBox(height: 24),
-
-                // Canva URL
-                const Text(
-                  'Canva URL',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  (post.canvaUrl == null || post.canvaUrl!.isEmpty)
-                      ? '未登録'
-                      : post.canvaUrl!,
-                  style: TextStyle(
-                    decoration: (post.canvaUrl == null ||
-                            post.canvaUrl!.isEmpty)
-                        ? TextDecoration.none
-                        : TextDecoration.underline,
-                    color: (post.canvaUrl == null ||
-                            post.canvaUrl!.isEmpty)
-                        ? null
-                        : Colors.blue,
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // チェック状況
-                const Text(
-                  'チェック状況',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      post.firstCheck
-                          ? Icons.check_box
-                          : Icons.check_box_outline_blank,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('1st check'),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      post.secondCheck
-                          ? Icons.check_box
-                          : Icons.check_box_outline_blank,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Check ②'),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // ファイル & メディア
-                const Text(
-                  'ファイル & メディア',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
+                // ファイル&メディア（PDFなど）
+                _sectionTitle('ファイル&メディア'),
                 if (post.fileUrls.isEmpty)
-                  const Text('ファイルは登録されていません')
+                  const Text('未設定')
                 else
                   Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (int i = 0; i < post.fileUrls.length; i++) ...[
-                        Text(
-                          'ファイル ${i + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                    children: post.fileUrls.map((u) {
+                      final name = _fileNameFromUrl(u);
+                      return Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.picture_as_pdf),
+                          title: Text(name),
+                          subtitle: const Text('タップして開く'),
+                          onTap: () => _openUrl(u), // まずは外部でOK
                         ),
-                        Text(
-                          post.fileUrls[i],
-                          style: const TextStyle(
-                            fontSize: 13,
-                            decoration: TextDecoration.underline,
-                            color: Colors.blue,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ]
-                    ],
+                      );
+                    }).toList(),
+                  ),
+
+                // Canva URL
+                _sectionTitle('Canva'),
+                if ((post.canvaUrl ?? '').isEmpty)
+                  const Text('未設定')
+                else
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.design_services),
+                      title: const Text('Canvaで開く'),
+                      subtitle: const Text('タップして外部ブラウザで開く'),
+                      onTap: () => _openUrl(post.canvaUrl!),
+                    ),
                   ),
 
                 const SizedBox(height: 24),
