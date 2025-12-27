@@ -208,7 +208,7 @@ class Post {
       secondCheck: _getCheckbox('Check ②'),
       secondCheckAssignees: _getPeopleNames('Check ② 担当'),
       status: _getStatusName('ステータス'),
-      fileUrls: _getFileUrls('ファイル&メディア'),
+      fileUrls: _getFileUrls('ファイル＆メディア'),
       authors: _getPeopleNames('著者'),
       createdTime: _parseDateTimeTopLevel('created_time'),
       lastEditedTime: _parseDateTimeTopLevel('last_edited_time'),

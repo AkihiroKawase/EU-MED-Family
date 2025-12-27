@@ -1,4 +1,5 @@
 // lib/screens/post_detail_screen.dart
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -13,6 +14,23 @@ class PostDetailScreen extends StatefulWidget {
 
   @override
   State<PostDetailScreen> createState() => _PostDetailScreenState();
+}
+
+Future<void> openPdfFromNotion(String pageId) async {
+  final callable =
+      FirebaseFunctions.instance.httpsCallable('getMediaUrl');
+
+  final result = await callable.call({'pageId': pageId});
+  final url = result.data['url'] as String?;
+
+  if (url == null) {
+    throw Exception('PDFが見つかりません');
+  }
+
+  await launchUrl(
+    Uri.parse(url),
+    mode: LaunchMode.externalApplication,
+  );
 }
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
@@ -76,6 +94,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
           final post = snapshot.data!;
 
+          debugPrint('DEBUG post authors=${post.authors}, fileUrls=${post.fileUrls}');
           // まずここで値が入っているか確認（デバッグ用）
           debugPrint('DETAIL post: '
               'cats=${post.categories}, authors=${post.authors}, '
