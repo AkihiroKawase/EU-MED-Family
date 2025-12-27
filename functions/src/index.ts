@@ -188,11 +188,6 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     return prop.status?.name ?? null;
   };
 
-  console.log("DEBUG keys:", Object.keys(props));
-  console.log("DEBUG Category raw:", props["Category"]);
-  console.log("DEBUG 著者 raw:", props["著者"]);
-  console.log("DEBUG ファイル raw:", props["ファイル&メディア"]);
-  
   return {
     id: page.id,
     title: getTitle("タイトル"),
@@ -209,9 +204,7 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     status: getStatusName("ステータス"),
     createdTime: page.created_time || null,
     lastEditedTime: page.last_edited_time || null,
-
   };
-
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +285,21 @@ async function syncUserWithNotion(email: string | undefined, uid: string) {
         lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
 
+          if (targetNotionUser) {
+      const notionUserId = targetNotionUser.id;
+
+      // 3. Firestoreを更新
+      await db.collection("users").doc(uid).set({
+        notionUserId: notionUserId,
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+
       console.log(`Synced ${email} to Notion User ID: ${notionUserId}`);
       return notionUserId;
+    } else {
+      console.log(`No matching Notion user found for email: ${email}`);
+      return null;
+    }
     } else {
       console.log(`No matching user found in database for email: ${email}`);
       return null;
