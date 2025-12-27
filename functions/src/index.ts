@@ -191,6 +191,7 @@ function buildNotionProperties(post: UpsertPostInput) {
 
 /**
  * 共通ロジック: メールアドレスからNotionユーザーIDを取得してFirestoreを更新する
+ * 「アプリユーザーDB」の「Email」プロパティで検索し、「Person」プロパティからNotionユーザーIDを取得
  * @param {string | undefined} email - ユーザーのメールアドレス
  * @param {string} uid - Firebase AuthのUser ID
  * @return {Promise<string | null>} Notion User ID または null
@@ -204,28 +205,56 @@ async function syncUserWithNotion(email: string | undefined, uid: string) {
   // 遅延初期化でクライアントを取得
   const client = getNotionClient();
 
-  try {
-    // 1. Notionの全ユーザーを取得
-    const response = await client.users.list({});
-    const notionUsers = response.results;
+  // 「アプリユーザーDB」データベースID
+  const appUserDatabaseId = "299aae8f429e8006aabae5f8c7899915";
 
-    // 2. メールアドレスが一致するユーザーを検索
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const targetNotionUser = notionUsers.find((user: any) => {
-      return user.person && user.person.email === email;
+  try {
+    console.log(`Searching for user with email: ${email}`);
+
+    // 「アプリユーザーDB」で「Email」プロパティが一致するエントリを検索
+    const dbResponse = await client.databases.query({
+      database_id: appUserDatabaseId,
+      filter: {
+        property: "Email",
+        email: {
+          equals: email,
+        },
+      },
     });
 
-    if (targetNotionUser) {
-      // 3. Firestoreを更新
+    console.log(`Found ${dbResponse.results.length} matching entries`);
+
+    if (dbResponse.results.length > 0) {
+      const matchedPage = dbResponse.results[0];
+
+      // People型の「Person」プロパティからNotionユーザーIDを取得
+      if (!("properties" in matchedPage)) {
+        console.log("No properties found in matched page");
+        return null;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const props = matchedPage.properties as any;
+      const personProp = props["Person"];
+
+      if (!personProp || personProp.type !== "people" ||
+          !personProp.people || personProp.people.length === 0) {
+        console.log("No Person property found or it is empty");
+        return null;
+      }
+
+      const notionUserId = personProp.people[0].id;
+
+      // Firestoreを更新（notionUserIdフィールドにNotionユーザーIDを保存）
       await db.collection("users").doc(uid).set({
-        notionUserId: targetNotionUser.id,
+        notionUserId: notionUserId,
         lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
 
-      console.log(`Synced ${email} to Notion ID: ${targetNotionUser.id}`);
-      return targetNotionUser.id;
+      console.log(`Synced ${email} to Notion User ID: ${notionUserId}`);
+      return notionUserId;
     } else {
-      console.log(`No matching Notion user found for email: ${email}`);
+      console.log(`No matching user found in database for email: ${email}`);
       return null;
     }
   } catch (error) {
