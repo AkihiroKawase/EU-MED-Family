@@ -17,6 +17,8 @@ class _PostListScreenState extends State<PostListScreen> {
   final _notionService = NotionPostService();
   late Future<List<Post>> _futurePosts;
 
+  String? _selectedCategory; // null = すべて
+
   @override
   void initState() {
     super.initState();
@@ -31,12 +33,9 @@ class _PostListScreenState extends State<PostListScreen> {
 
   void _goToNewPost() async {
     final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const PostEditScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const PostEditScreen()),
     );
 
-    // 新規作成・編集後にリロード
     if (result == true) {
       _reload();
     }
@@ -44,14 +43,37 @@ class _PostListScreenState extends State<PostListScreen> {
 
   void _goToDetail(Post post) async {
     final result = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PostDetailScreen(postId: post.id),
-      ),
+      MaterialPageRoute(builder: (_) => PostDetailScreen(postId: post.id)),
     );
 
     if (result == true) {
       _reload();
     }
+  }
+
+  // --- カテゴリ文字列の正規化（未設定をまとめる） ---
+  String _normalizeCategory(Post p) {
+    final raw = (p.categories.isNotEmpty ? p.categories.first : '').trim();
+    return raw.isEmpty ? '未設定' : raw;
+  }
+
+  // --- チップ一覧（postsから自動生成） ---
+  List<String> _buildCategoryOptions(List<Post> posts) {
+    final set = <String>{};
+    for (final p in posts) {
+      set.add(_normalizeCategory(p));
+    }
+
+    final list = set.toList()..sort();
+    // 未設定は最後に回す（好み）
+    if (list.remove('未設定')) list.add('未設定');
+    return list;
+  }
+
+  // --- 選択カテゴリで絞り込み ---
+  List<Post> _filterPosts(List<Post> posts) {
+    if (_selectedCategory == null) return posts;
+    return posts.where((p) => _normalizeCategory(p) == _selectedCategory).toList();
   }
 
   @override
@@ -102,38 +124,72 @@ class _PostListScreenState extends State<PostListScreen> {
               );
             }
 
+            final categories = _buildCategoryOptions(posts);
+            final filteredPosts = _filterPosts(posts);
+
+            // 先頭(チップ領域) + 投稿リスト(filteredPosts)
             return ListView.separated(
-              itemCount: posts.length,
+              itemCount: 1 + filteredPosts.length,
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
-                final post = posts[index];
+                // --- 先頭はチップ領域 ---
+                if (index == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('すべて'),
+                              selected: _selectedCategory == null,
+                              onSelected: (_) => setState(() => _selectedCategory = null),
+                            ),
+                            ...categories.map((c) => ChoiceChip(
+                                  label: Text(c),
+                                  selected: _selectedCategory == c,
+                                  onSelected: (_) => setState(() => _selectedCategory = c),
+                                )),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '表示: ${filteredPosts.length}件',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                // --- ここから投稿リスト ---
+                final post = filteredPosts[index - 1];
 
                 final statusText = post.status ?? '';
-                final categoryText = post.firstCategory ?? '';
+                // ★ ここが修正ポイント：表示側も正規化カテゴリを使う（消えない）
+                final categoryText = _normalizeCategory(post);
                 final authorText = post.firstAuthor ?? '';
 
                 // 1行目用のテキスト（ステータス / カテゴリ）
-                String metaLine = '';
-                if (statusText.isNotEmpty) {
-                  metaLine += 'ステータス: $statusText';
-                }
-                if (categoryText.isNotEmpty) {
-                  if (metaLine.isNotEmpty) metaLine += ' / ';
-                  metaLine += 'カテゴリ: $categoryText';
-                }
+                final metaLine = [
+                  if (statusText.isNotEmpty) 'ステータス: $statusText',
+                  'カテゴリ: $categoryText', // ← 常に表示（未設定も含む）
+                ].join(' / ');
 
                 return ListTile(
                   title: Text(post.title.isEmpty ? '(無題)' : post.title),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (metaLine.isNotEmpty)
-                        Text(
-                          metaLine,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13),
-                        ),
+                      Text(
+                        metaLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
                       if (authorText.isNotEmpty)
                         Text(
                           '著者: $authorText',
