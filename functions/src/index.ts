@@ -7,6 +7,39 @@ import {
   CreatePageParameters,
 } from "@notionhq/client/build/src/api-endpoints";
 
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN,
+});
+
+// ★ これを追加
+export const getMediaUrl = functions.https.onCall(async (data) => {
+  const pageId = data.pageId as string;
+  if (!pageId) {
+    throw new functions.https.HttpsError("invalid-argument", "pageId is required");
+  }
+
+  const page: any = await notion.pages.retrieve({ page_id: pageId });
+
+  const propName = "ファイル&メディア";
+  const prop = page.properties[propName];
+
+  if (!prop || prop.type !== "files") {
+    return { url: null };
+  }
+
+  const file = prop.files?.[0];
+  if (!file) return { url: null };
+
+  const url =
+    file.type === "file"
+      ? file.file?.url
+      : file.type === "external"
+      ? file.external?.url
+      : null;
+
+  return { url };
+});
+
 // Firebase Admin SDKの初期化
 admin.initializeApp();
 const db = admin.firestore();
@@ -83,84 +116,83 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props = page.properties as any;
 
-  // タイトル取得
   const getTitle = (key: string): string => {
     const prop = props[key];
     if (!prop || prop.type !== "title") return "";
-    const titleList = prop.title || [];
-    if (titleList.length === 0) return "";
-    return titleList[0]?.plain_text || "";
+    const arr = prop.title ?? [];
+    return arr.length > 0 ? (arr[0]?.plain_text ?? "") : "";
   };
 
-  // チェックボックス取得
   const getCheckbox = (key: string): boolean => {
     const prop = props[key];
     if (!prop || prop.type !== "checkbox") return false;
     return prop.checkbox ?? false;
   };
 
-  // URL取得
   const getUrl = (key: string): string | null => {
     const prop = props[key];
     if (!prop || prop.type !== "url") return null;
-    return prop.url;
+    return prop.url ?? null;
   };
 
-  // ✅ select取得（Category用）
-  const getSelectName = (key: string): string | null => {
+  // ✅ select / multi_select 両対応
+  const getCategoryNames = (key: string): string[] => {
     const prop = props[key];
-    if (!prop || prop.type !== "select") return null;
-    const sel = prop.select;
-    if (!sel) return null;
-    return sel.name || null;
+    if (!prop) return [];
+
+    if (prop.type === "select") {
+      const sel = prop.select;
+      return sel?.name ? [sel.name] : [];
+    }
+
+    if (prop.type === "multi_select") {
+      const ms = prop.multi_select ?? [];
+      return ms
+        .map((e: any) => e?.name ?? "")
+        .filter((name: string) => name.length > 0);
+    }
+
+    return [];
   };
 
-  // （保険）multi_select取得（将来 multi_select に変えても壊れないため）
-  const getMultiSelectNames = (key: string): string[] => {
-    const prop = props[key];
-    if (!prop || prop.type !== "multi_select") return [];
-    const ms = prop.multi_select || [];
-    return ms
-      .map((e: { name?: string }) => e.name || "")
-      .filter((name: string) => name.length > 0);
-  };
-
-  // ✅ people取得（著者 / Check②担当）
+  // ✅ people: prop.people ではなく prop.people配列(型チェック込み)
   const getPeopleNames = (key: string): string[] => {
     const prop = props[key];
     if (!prop || prop.type !== "people") return [];
-    const people = prop.people || [];
+    const people = prop.people ?? [];
     return people
-      .map((p: { name?: string }) => p.name || "")
+      .map((p: any) => p?.name ?? "")
       .filter((name: string) => name.length > 0);
   };
 
-  // ✅ files取得（ファイル&メディア）
+  // ✅ files: prop.files は配列。file/external の url を取る
   const getFileUrls = (key: string): string[] => {
     const prop = props[key];
     if (!prop || prop.type !== "files") return [];
-    const files = prop.files || [];
+    const files = prop.files ?? [];
     return files
       .map((f: any) => {
-        const fileObj = f.file ?? f.external;
-        return fileObj?.url || "";
+        // Notion: { type: "file", file: { url } } or { type: "external", external:{ url } }
+        if (f?.type === "file") return f?.file?.url ?? "";
+        if (f?.type === "external") return f?.external?.url ?? "";
+        // 互換（念のため）
+        const fileObj = f?.file ?? f?.external;
+        return fileObj?.url ?? "";
       })
-      .filter((url: string) => url.length > 0);
+      .filter((u: string) => u.length > 0);
   };
 
-  // ステータス取得（status型）
   const getStatusName = (key: string): string | null => {
     const prop = props[key];
     if (!prop || prop.type !== "status") return null;
-    const status = prop.status;
-    if (!status) return null;
-    return status.name || null;
+    return prop.status?.name ?? null;
   };
 
-  // ✅ Category：select優先、なければmulti_select（保険）
-  const catSelect = getSelectName("Category");
-  const categories = catSelect ? [catSelect] : getMultiSelectNames("Category");
-
+  console.log("DEBUG keys:", Object.keys(props));
+  console.log("DEBUG Category raw:", props["Category"]);
+  console.log("DEBUG 著者 raw:", props["著者"]);
+  console.log("DEBUG ファイル raw:", props["ファイル&メディア"]);
+  
   return {
     id: page.id,
     title: getTitle("タイトル"),
@@ -168,7 +200,7 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     secondCheck: getCheckbox("Check ②"),
     canvaUrl: getUrl("Canva URL"),
 
-    categories,
+    categories: getCategoryNames("Category"),
 
     secondCheckAssignees: getPeopleNames("Check ② 担当"),
     authors: getPeopleNames("著者"),
@@ -177,7 +209,9 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     status: getStatusName("ステータス"),
     createdTime: page.created_time || null,
     lastEditedTime: page.last_edited_time || null,
+
   };
+
 }
 
 // ---------------------------------------------------------------------------
