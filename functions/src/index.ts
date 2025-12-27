@@ -1,11 +1,44 @@
 import * as functions from "firebase-functions/v1"; // v1を明示的に指定してエラーを回避
 import * as admin from "firebase-admin";
-import {onCall, HttpsError} from "firebase-functions/v2/https";
-import {Client} from "@notionhq/client";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { Client } from "@notionhq/client";
 import {
   PageObjectResponse,
   CreatePageParameters,
 } from "@notionhq/client/build/src/api-endpoints";
+
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN,
+});
+
+// ★ これを追加
+export const getMediaUrl = functions.https.onCall(async (data) => {
+  const pageId = data.pageId as string;
+  if (!pageId) {
+    throw new functions.https.HttpsError("invalid-argument", "pageId is required");
+  }
+
+  const page: any = await notion.pages.retrieve({ page_id: pageId });
+
+  const propName = "ファイル&メディア";
+  const prop = page.properties[propName];
+
+  if (!prop || prop.type !== "files") {
+    return { url: null };
+  }
+
+  const file = prop.files?.[0];
+  if (!file) return { url: null };
+
+  const url =
+    file.type === "file"
+      ? file.file?.url
+      : file.type === "external"
+      ? file.external?.url
+      : null;
+
+  return { url };
+});
 
 // Firebase Admin SDKの初期化
 admin.initializeApp();
@@ -21,20 +54,14 @@ let cachedNotionClient: Client | null = null;
  * 関数実行時に初めて環境変数を読み込むことで、.env の値を確実に取得する
  */
 function getNotionClient(): Client {
-  if (cachedNotionClient) {
-    return cachedNotionClient;
-  }
+  if (cachedNotionClient) return cachedNotionClient;
 
   const apiKey = process.env.NOTION_API_KEY || "";
-
   if (!apiKey) {
-    throw new HttpsError(
-      "failed-precondition",
-      "NOTION_API_KEY is not configured."
-    );
+    throw new HttpsError("failed-precondition", "NOTION_API_KEY is not configured.");
   }
 
-  cachedNotionClient = new Client({auth: apiKey});
+  cachedNotionClient = new Client({ auth: apiKey });
   return cachedNotionClient;
 }
 
@@ -43,14 +70,9 @@ function getNotionClient(): Client {
  */
 function getNotionDatabaseId(): string {
   const databaseId = process.env.NOTION_DATABASE_ID || "";
-
   if (!databaseId) {
-    throw new HttpsError(
-      "failed-precondition",
-      "NOTION_DATABASE_ID is not configured."
-    );
+    throw new HttpsError("failed-precondition", "NOTION_DATABASE_ID is not configured.");
   }
-
   return databaseId;
 }
 
@@ -63,7 +85,15 @@ interface PostData {
   firstCheck: boolean;
   secondCheck: boolean;
   canvaUrl: string | null;
+
+  // ✅ Category は Notion 側が select 想定（アプリ側は配列で扱ってOK）
   categories: string[];
+
+  // ✅ 追加：詳細表示用
+  secondCheckAssignees: string[];
+  authors: string[];
+  fileUrls: string[];
+
   status: string | null;
   createdTime: string | null;
   lastEditedTime: string | null;
@@ -86,46 +116,76 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props = page.properties as any;
 
-  // タイトル取得
   const getTitle = (key: string): string => {
     const prop = props[key];
     if (!prop || prop.type !== "title") return "";
-    const titleList = prop.title || [];
-    if (titleList.length === 0) return "";
-    return titleList[0]?.plain_text || "";
+    const arr = prop.title ?? [];
+    return arr.length > 0 ? (arr[0]?.plain_text ?? "") : "";
   };
 
-  // チェックボックス取得
   const getCheckbox = (key: string): boolean => {
     const prop = props[key];
     if (!prop || prop.type !== "checkbox") return false;
     return prop.checkbox ?? false;
   };
 
-  // URL取得
   const getUrl = (key: string): string | null => {
     const prop = props[key];
     if (!prop || prop.type !== "url") return null;
-    return prop.url;
+    return prop.url ?? null;
   };
 
-  // マルチセレクト取得
-  const getMultiSelectNames = (key: string): string[] => {
+  // ✅ select / multi_select 両対応
+  const getCategoryNames = (key: string): string[] => {
     const prop = props[key];
-    if (!prop || prop.type !== "multi_select") return [];
-    const ms = prop.multi_select || [];
-    return ms
-      .map((e: {name?: string}) => e.name || "")
+    if (!prop) return [];
+
+    if (prop.type === "select") {
+      const sel = prop.select;
+      return sel?.name ? [sel.name] : [];
+    }
+
+    if (prop.type === "multi_select") {
+      const ms = prop.multi_select ?? [];
+      return ms
+        .map((e: any) => e?.name ?? "")
+        .filter((name: string) => name.length > 0);
+    }
+
+    return [];
+  };
+
+  // ✅ people: prop.people ではなく prop.people配列(型チェック込み)
+  const getPeopleNames = (key: string): string[] => {
+    const prop = props[key];
+    if (!prop || prop.type !== "people") return [];
+    const people = prop.people ?? [];
+    return people
+      .map((p: any) => p?.name ?? "")
       .filter((name: string) => name.length > 0);
   };
 
-  // ステータス取得
+  // ✅ files: prop.files は配列。file/external の url を取る
+  const getFileUrls = (key: string): string[] => {
+    const prop = props[key];
+    if (!prop || prop.type !== "files") return [];
+    const files = prop.files ?? [];
+    return files
+      .map((f: any) => {
+        // Notion: { type: "file", file: { url } } or { type: "external", external:{ url } }
+        if (f?.type === "file") return f?.file?.url ?? "";
+        if (f?.type === "external") return f?.external?.url ?? "";
+        // 互換（念のため）
+        const fileObj = f?.file ?? f?.external;
+        return fileObj?.url ?? "";
+      })
+      .filter((u: string) => u.length > 0);
+  };
+
   const getStatusName = (key: string): string | null => {
     const prop = props[key];
     if (!prop || prop.type !== "status") return null;
-    const status = prop.status;
-    if (!status) return null;
-    return status.name || null;
+    return prop.status?.name ?? null;
   };
 
   return {
@@ -134,7 +194,13 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     firstCheck: getCheckbox("1st check"),
     secondCheck: getCheckbox("Check ②"),
     canvaUrl: getUrl("Canva URL"),
-    categories: getMultiSelectNames("Category"),
+
+    categories: getCategoryNames("Category"),
+
+    secondCheckAssignees: getPeopleNames("Check ② 担当"),
+    authors: getPeopleNames("著者"),
+    fileUrls: getFileUrls("ファイル&メディア"),
+
     status: getStatusName("ステータス"),
     createdTime: page.created_time || null,
     lastEditedTime: page.last_edited_time || null,
@@ -147,19 +213,16 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
 function buildNotionProperties(post: UpsertPostInput) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props: any = {
-    // タイトル
     "タイトル": {
       title: [
         {
-          text: {content: post.title},
+          text: { content: post.title },
         },
       ],
     },
-    // 1st check
     "1st check": {
       checkbox: post.firstCheck,
     },
-    // Check ②
     "Check ②": {
       checkbox: post.secondCheck,
     },
@@ -172,17 +235,18 @@ function buildNotionProperties(post: UpsertPostInput) {
     };
   }
 
-  // Category (select型: 配列の最初の要素のみを使用)
-  if (post.categories !== undefined && post.categories.length > 0) {
-    props["Category"] = {
-      select: {name: post.categories[0]},
-    };
+  // ✅ Category（select型）
+  // - post.categories が渡された場合は、先頭のみ保存（selectのため）
+  // - 空配列ならカテゴリをクリアしたい場合は select:null
+  if (post.categories !== undefined) {
+    const name = post.categories.length > 0 ? post.categories[0] : null;
+    props["Category"] = name ? { select: { name } } : { select: null };
   }
 
-  // ステータス
+  // ステータス（status型）
   if (post.status !== undefined) {
     props["ステータス"] = {
-      status: post.status ? {name: post.status} : null,
+      status: post.status ? { name: post.status } : null,
     };
   }
 
@@ -191,7 +255,6 @@ function buildNotionProperties(post: UpsertPostInput) {
 
 /**
  * 共通ロジック: メールアドレスからNotionユーザーIDを取得してFirestoreを更新する
- * 「アプリユーザーDB」の「Email」プロパティで検索し、「Person」プロパティからNotionユーザーIDを取得
  * @param {string | undefined} email - ユーザーのメールアドレス
  * @param {string} uid - Firebase AuthのUser ID
  * @return {Promise<string | null>} Notion User ID または null
@@ -202,50 +265,30 @@ async function syncUserWithNotion(email: string | undefined, uid: string) {
     return null;
   }
 
-  // 遅延初期化でクライアントを取得
   const client = getNotionClient();
 
-  // 「アプリユーザーDB」データベースID
-  const appUserDatabaseId = "299aae8f429e8006aabae5f8c7899915";
-
   try {
-    console.log(`Searching for user with email: ${email}`);
+    // 1. Notionの全ユーザーを取得
+    const response = await client.users.list({});
+    const notionUsers = response.results;
 
-    // 「アプリユーザーDB」で「Email」プロパティが一致するエントリを検索
-    const dbResponse = await client.databases.query({
-      database_id: appUserDatabaseId,
-      filter: {
-        property: "Email",
-        email: {
-          equals: email,
-        },
-      },
+    // 2. メールアドレスが一致するユーザーを検索
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const targetNotionUser = notionUsers.find((user: any) => {
+      return user.person && user.person.email === email;
     });
 
-    console.log(`Found ${dbResponse.results.length} matching entries`);
+    if (targetNotionUser) {
+      // 3. Firestoreを更新
+      await db.collection("users").doc(uid).set({
+        notionUserId: targetNotionUser.id,
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
 
-    if (dbResponse.results.length > 0) {
-      const matchedPage = dbResponse.results[0];
+          if (targetNotionUser) {
+      const notionUserId = targetNotionUser.id;
 
-      // People型の「Person」プロパティからNotionユーザーIDを取得
-      if (!("properties" in matchedPage)) {
-        console.log("No properties found in matched page");
-        return null;
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const props = matchedPage.properties as any;
-      const personProp = props["Person"];
-
-      if (!personProp || personProp.type !== "people" ||
-          !personProp.people || personProp.people.length === 0) {
-        console.log("No Person property found or it is empty");
-        return null;
-      }
-
-      const notionUserId = personProp.people[0].id;
-
-      // Firestoreを更新（notionUserIdフィールドにNotionユーザーIDを保存）
+      // 3. Firestoreを更新
       await db.collection("users").doc(uid).set({
         notionUserId: notionUserId,
         lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -253,6 +296,10 @@ async function syncUserWithNotion(email: string | undefined, uid: string) {
 
       console.log(`Synced ${email} to Notion User ID: ${notionUserId}`);
       return notionUserId;
+    } else {
+      console.log(`No matching Notion user found for email: ${email}`);
+      return null;
+    }
     } else {
       console.log(`No matching user found in database for email: ${email}`);
       return null;
@@ -276,7 +323,6 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
  * v2の書き方を使用
  */
 export const syncNotionUser = onCall(async (request) => {
-  // 認証チェック
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");
   }
@@ -286,7 +332,6 @@ export const syncNotionUser = onCall(async (request) => {
 
   const notionUserId = await syncUserWithNotion(email, uid);
 
-  // フロントエンドへの戻り値
   return {
     success: !!notionUserId,
     notionUserId: notionUserId,
@@ -301,12 +346,10 @@ export const syncNotionUser = onCall(async (request) => {
  * getPosts: Notion DBから投稿一覧を取得
  */
 export const getPosts = onCall(async (request) => {
-  // 認証チェック
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");
   }
 
-  // 遅延初期化でクライアントとDB IDを取得
   const client = getNotionClient();
   const databaseId = getNotionDatabaseId();
 
@@ -327,10 +370,7 @@ export const getPosts = onCall(async (request) => {
       .filter((page): page is PageObjectResponse => "properties" in page)
       .map(parseNotionPageToPost);
 
-    return {
-      success: true,
-      posts: posts,
-    };
+    return { success: true, posts };
   } catch (error) {
     console.error("Error fetching posts from Notion:", error);
     throw new HttpsError("internal", "Failed to fetch posts from Notion.");
@@ -341,7 +381,6 @@ export const getPosts = onCall(async (request) => {
  * getPost: Notion から単一ページを取得
  */
 export const getPost = onCall(async (request) => {
-  // 認証チェック
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");
   }
@@ -351,11 +390,10 @@ export const getPost = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "pageId is required.");
   }
 
-  // 遅延初期化でクライアントを取得
   const client = getNotionClient();
 
   try {
-    const page = await client.pages.retrieve({page_id: pageId});
+    const page = await client.pages.retrieve({ page_id: pageId });
 
     if (!("properties" in page)) {
       throw new HttpsError("not-found", "Page not found or is not accessible.");
@@ -363,10 +401,7 @@ export const getPost = onCall(async (request) => {
 
     const post = parseNotionPageToPost(page as PageObjectResponse);
 
-    return {
-      success: true,
-      post: post,
-    };
+    return { success: true, post };
   } catch (error) {
     console.error("Error fetching post from Notion:", error);
     throw new HttpsError("internal", "Failed to fetch post from Notion.");
@@ -377,12 +412,10 @@ export const getPost = onCall(async (request) => {
  * upsertPost: Notion にページを作成または更新
  */
 export const upsertPost = onCall(async (request) => {
-  // 認証チェック
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in.");
   }
 
-  // 遅延初期化でクライアントとDB IDを取得
   const client = getNotionClient();
   const databaseId = getNotionDatabaseId();
 
@@ -395,21 +428,16 @@ export const upsertPost = onCall(async (request) => {
 
   try {
     if (data.id && data.id.length > 0) {
-      // 更新
       await client.pages.update({
         page_id: data.id,
-        properties: properties,
+        properties,
       });
 
-      return {
-        success: true,
-        message: "Post updated successfully.",
-      };
+      return { success: true, message: "Post updated successfully." };
     } else {
-      // 新規作成
       const createParams: CreatePageParameters = {
-        parent: {database_id: databaseId},
-        properties: properties,
+        parent: { database_id: databaseId },
+        properties,
       };
 
       const newPage = await client.pages.create(createParams);
@@ -421,7 +449,6 @@ export const upsertPost = onCall(async (request) => {
       };
     }
   } catch (error) {
-    // Notion API エラーの詳細をログに出力
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Error upserting post to Notion:", error);
     console.error("Error details:", errorMessage);
