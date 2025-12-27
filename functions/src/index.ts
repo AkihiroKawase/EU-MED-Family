@@ -262,6 +262,9 @@ function buildNotionProperties(post: UpsertPostInput) {
 
 /**
  * 共通ロジック: メールアドレスからNotionユーザーIDを取得してFirestoreを更新する
+ * @param {string | undefined} email - ユーザーのメールアドレス
+ * @param {string} uid - Firebase AuthのUser ID
+ * @return {Promise<string | null>} Notion User ID または null
  */
 async function syncUserWithNotion(email: string | undefined, uid: string) {
   if (!email) {
@@ -272,30 +275,27 @@ async function syncUserWithNotion(email: string | undefined, uid: string) {
   const client = getNotionClient();
 
   try {
+    // 1. Notionの全ユーザーを取得
     const response = await client.users.list({});
     const notionUsers = response.results;
 
+    // 2. メールアドレスが一致するユーザーを検索
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const targetNotionUser = notionUsers.find((user: any) => {
       return user.person && user.person.email === email;
     });
 
     if (targetNotionUser) {
-      await db
-        .collection("users")
-        .doc(uid)
-        .set(
-          {
-            notionUserId: targetNotionUser.id,
-            lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
+      // 3. Firestoreを更新
+      await db.collection("users").doc(uid).set({
+        notionUserId: targetNotionUser.id,
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
 
-      console.log(`Synced ${email} to Notion ID: ${targetNotionUser.id}`);
-      return targetNotionUser.id;
+      console.log(`Synced ${email} to Notion User ID: ${notionUserId}`);
+      return notionUserId;
     } else {
-      console.log(`No matching Notion user found for email: ${email}`);
+      console.log(`No matching user found in database for email: ${email}`);
       return null;
     }
   } catch (error) {
