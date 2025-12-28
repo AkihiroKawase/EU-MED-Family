@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'profile_edit_screen.dart';
+import 'profile_list_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -47,13 +48,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _passwordController.text,
       );
       
-      // 登録成功後、プロフィール編集画面へ遷移
+      // 登録成功後、プロフィール編集画面へ遷移（ナビゲーションスタックをクリア）
       if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const ProfileEditScreen(),
-          ),
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const ProfileEditScreen()),
+          (route) => false,
         );
       }
     } on FirebaseAuthException catch (e) {
