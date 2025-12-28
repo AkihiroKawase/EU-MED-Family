@@ -39,6 +39,8 @@ class Post {
   final DateTime? createdTime;
   final DateTime? lastEditedTime;
 
+  final String? imagePath;
+
   Post({
     required this.id,
     required this.title,
@@ -52,6 +54,7 @@ class Post {
     this.authors = const [],
     this.createdTime,
     this.lastEditedTime,
+    this.imagePath,
   });
 
   /// Category の先頭だけ使いたい場合
@@ -86,6 +89,7 @@ class Post {
       lastEditedTime: json['lastEditedTime'] != null
           ? DateTime.tryParse(json['lastEditedTime'].toString())
           : null,
+      imagePath: json['imagePath']?.toString(),
     );
   }
 
@@ -104,6 +108,7 @@ class Post {
       'authors': authors,
       'createdTime': createdTime?.toIso8601String(),
       'lastEditedTime': lastEditedTime?.toIso8601String(),
+      'imagePath': imagePath,
     };
   }
 

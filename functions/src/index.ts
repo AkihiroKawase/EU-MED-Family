@@ -97,6 +97,7 @@ interface PostData {
   status: string | null;
   createdTime: string | null;
   lastEditedTime: string | null;
+  imagePath: string | null;
 }
 
 interface UpsertPostInput {
@@ -107,6 +108,7 @@ interface UpsertPostInput {
   canvaUrl?: string | null;
   categories?: string[];
   status?: string | null;
+  imagePath: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +190,14 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     return prop.status?.name ?? null;
   };
 
+  const getRichTextPlain = (key: string): string | null => {
+    const prop = props[key];
+    if (!prop || prop.type !== "rich_text") return null;
+    const arr = prop.rich_text ?? [];
+    const text = arr.map((t: any) => t?.plain_text ?? "").join("");
+    return text.length > 0 ? text : null;
+  };
+
   return {
     id: page.id,
     title: getTitle("タイトル"),
@@ -204,6 +214,7 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
     status: getStatusName("ステータス"),
     createdTime: page.created_time || null,
     lastEditedTime: page.last_edited_time || null,
+    imagePath: getRichTextPlain("ImagePath"),
   };
 }
 
@@ -211,43 +222,38 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
 // ヘルパー関数: PostData を Notion プロパティに変換
 // ---------------------------------------------------------------------------
 function buildNotionProperties(post: UpsertPostInput) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const props: any = {
+  const props: Record<string, any> = {
     "タイトル": {
-      title: [
-        {
-          text: { content: post.title },
-        },
-      ],
+      title: [{ text: { content: post.title } }],
     },
-    "1st check": {
-      checkbox: post.firstCheck,
-    },
-    "Check ②": {
-      checkbox: post.secondCheck,
-    },
+    "1st check": { checkbox: !!post.firstCheck },
+    "Check ②": { checkbox: !!post.secondCheck },
   };
 
-  // Canva URL
-  if (post.canvaUrl !== undefined) {
-    props["Canva URL"] = {
-      url: post.canvaUrl || null,
+  // Canva URL（空なら送らない）
+  if (post.canvaUrl != null && post.canvaUrl.trim() !== "") {
+    props["Canva URL"] = { url: post.canvaUrl.trim() };
+  }
+
+  // ✅ Category（select）: 空なら送らない（nullでクリアしない）
+  if (Array.isArray(post.categories) && post.categories.length > 0) {
+    const name = String(post.categories[0]).trim();
+    if (name !== "") {
+      props["Category"] = { select: { name } };
+    }
+  }
+
+  if (post.imagePath !== undefined) {
+    props["ImagePath"] = {
+      rich_text: post.imagePath
+        ? [{ text: { content: post.imagePath } }]
+        : [],
     };
   }
 
-  // ✅ Category（select型）
-  // - post.categories が渡された場合は、先頭のみ保存（selectのため）
-  // - 空配列ならカテゴリをクリアしたい場合は select:null
-  if (post.categories !== undefined) {
-    const name = post.categories.length > 0 ? post.categories[0] : null;
-    props["Category"] = name ? { select: { name } } : { select: null };
-  }
-
-  // ステータス（status型）
-  if (post.status !== undefined) {
-    props["ステータス"] = {
-      status: post.status ? { name: post.status } : null,
-    };
+  // ✅ ステータス（status）: 空なら送らない（nullでクリアしない）
+  if (post.status != null && String(post.status).trim() !== "") {
+    props["ステータス"] = { status: { name: String(post.status).trim() } };
   }
 
   return props;
@@ -420,11 +426,15 @@ export const upsertPost = onCall(async (request) => {
   const databaseId = getNotionDatabaseId();
 
   const data = request.data as UpsertPostInput | undefined;
-  if (!data || typeof data.title !== "string") {
+  if (!data || typeof data.title !== "string" || data.title.trim() === "") {
     throw new HttpsError("invalid-argument", "title is required.");
   }
 
   const properties = buildNotionProperties(data);
+
+  // ✅ デバッグしやすいログ（Functionsログで確認）
+  console.log("upsertPost input:", JSON.stringify(data));
+  console.log("notion properties:", JSON.stringify(properties));
 
   try {
     if (data.id && data.id.length > 0) {
@@ -432,7 +442,6 @@ export const upsertPost = onCall(async (request) => {
         page_id: data.id,
         properties,
       });
-
       return { success: true, message: "Post updated successfully." };
     } else {
       const createParams: CreatePageParameters = {
@@ -451,7 +460,6 @@ export const upsertPost = onCall(async (request) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Error upserting post to Notion:", error);
-    console.error("Error details:", errorMessage);
     throw new HttpsError("internal", `Failed to upsert post to Notion: ${errorMessage}`);
   }
 });

@@ -93,6 +93,7 @@ class NotionPostService {
         'canvaUrl': post.canvaUrl,
         'categories': post.categories,
         'status': post.status,
+        'imagePath': post.imagePath,
       };
 
       // 更新時のみ id を含める

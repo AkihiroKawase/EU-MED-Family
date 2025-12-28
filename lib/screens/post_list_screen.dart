@@ -1,5 +1,7 @@
 // lib/screens/post_list_screen.dart
 import 'package:flutter/material.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+
 import '../models/post.dart';
 import '../services/notion_post_service.dart';
 import '../widgets/app_bottom_nav.dart';
@@ -17,8 +19,6 @@ class _PostListScreenState extends State<PostListScreen> {
   final _notionService = NotionPostService();
   late Future<List<Post>> _futurePosts;
 
-  String? _selectedCategory; // null = すべて
-
   @override
   void initState() {
     super.initState();
@@ -35,53 +35,20 @@ class _PostListScreenState extends State<PostListScreen> {
     final result = await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const PostEditScreen()),
     );
-
-    if (result == true) {
-      _reload();
-    }
+    if (result == true) _reload();
   }
 
   void _goToDetail(Post post) async {
     final result = await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PostDetailScreen(postId: post.id)),
     );
-
-    if (result == true) {
-      _reload();
-    }
-  }
-
-  // --- カテゴリ文字列の正規化（未設定をまとめる） ---
-  String _normalizeCategory(Post p) {
-    final raw = (p.categories.isNotEmpty ? p.categories.first : '').trim();
-    return raw.isEmpty ? '未設定' : raw;
-  }
-
-  // --- チップ一覧（postsから自動生成） ---
-  List<String> _buildCategoryOptions(List<Post> posts) {
-    final set = <String>{};
-    for (final p in posts) {
-      set.add(_normalizeCategory(p));
-    }
-
-    final list = set.toList()..sort();
-    // 未設定は最後に回す（好み）
-    if (list.remove('未設定')) list.add('未設定');
-    return list;
-  }
-
-  // --- 選択カテゴリで絞り込み ---
-  List<Post> _filterPosts(List<Post> posts) {
-    if (_selectedCategory == null) return posts;
-    return posts.where((p) => _normalizeCategory(p) == _selectedCategory).toList();
+    if (result == true) _reload();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('投稿一覧'),
-      ),
+      appBar: AppBar(title: const Text('投稿一覧')),
       body: RefreshIndicator(
         onRefresh: _reload,
         child: FutureBuilder<List<Post>>(
@@ -90,10 +57,7 @@ class _PostListScreenState extends State<PostListScreen> {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return ListView(
                 children: const [
-                  SizedBox(
-                    height: 200,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
+                  SizedBox(height: 200, child: Center(child: CircularProgressIndicator())),
                 ],
               );
             }
@@ -103,104 +67,34 @@ class _PostListScreenState extends State<PostListScreen> {
                 children: [
                   SizedBox(
                     height: 200,
-                    child: Center(
-                      child: Text('エラーが発生しました: ${snapshot.error}'),
-                    ),
+                    child: Center(child: Text('エラーが発生しました: ${snapshot.error}')),
                   ),
                 ],
               );
             }
 
             final posts = snapshot.data ?? [];
-
             if (posts.isEmpty) {
               return ListView(
                 children: const [
-                  SizedBox(
-                    height: 200,
-                    child: Center(child: Text('投稿がありません')),
-                  ),
+                  SizedBox(height: 200, child: Center(child: Text('投稿がありません'))),
                 ],
               );
             }
 
-            final categories = _buildCategoryOptions(posts);
-            final filteredPosts = _filterPosts(posts);
-
-            // 先頭(チップ領域) + 投稿リスト(filteredPosts)
             return ListView.separated(
-              itemCount: 1 + filteredPosts.length,
+              itemCount: posts.length,
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
-                // --- 先頭はチップ領域 ---
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ChoiceChip(
-                              label: const Text('すべて'),
-                              selected: _selectedCategory == null,
-                              onSelected: (_) => setState(() => _selectedCategory = null),
-                            ),
-                            ...categories.map((c) => ChoiceChip(
-                                  label: Text(c),
-                                  selected: _selectedCategory == c,
-                                  onSelected: (_) => setState(() => _selectedCategory = c),
-                                )),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '表示: ${filteredPosts.length}件',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                // --- ここから投稿リスト ---
-                final post = filteredPosts[index - 1];
-
-                final statusText = post.status ?? '';
-                // ★ ここが修正ポイント：表示側も正規化カテゴリを使う（消えない）
-                final categoryText = _normalizeCategory(post);
-                final authorText = post.firstAuthor ?? '';
-
-                // 1行目用のテキスト（ステータス / カテゴリ）
-                final metaLine = [
-                  if (statusText.isNotEmpty) 'ステータス: $statusText',
-                  'カテゴリ: $categoryText', // ← 常に表示（未設定も含む）
-                ].join(' / ');
+                final post = posts[index];
 
                 return ListTile(
+                  leading: _PostThumb(imagePath: post.imagePath),
                   title: Text(post.title.isEmpty ? '(無題)' : post.title),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        metaLine,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      if (authorText.isNotEmpty)
-                        Text(
-                          '著者: $authorText',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
-                    ],
+                  subtitle: Text(
+                    post.firstCategory ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _goToDetail(post),
@@ -215,6 +109,90 @@ class _PostListScreenState extends State<PostListScreen> {
         child: const Icon(Icons.add),
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 0),
+    );
+  }
+}
+
+/// 一覧のサムネ（imagePath が Storageパス or URL どちらでも対応）
+class _PostThumb extends StatelessWidget {
+  final String? imagePath;
+
+  const _PostThumb({required this.imagePath});
+
+  bool _looksLikeUrl(String s) => s.startsWith('http://') || s.startsWith('https://');
+
+  @override
+  Widget build(BuildContext context) {
+    if (imagePath == null || imagePath!.trim().isEmpty) {
+      return _placeholder();
+    }
+
+    final path = imagePath!.trim();
+
+    // ① NotionにURLが入ってる場合
+    if (_looksLikeUrl(path)) {
+      return _networkThumb(path);
+    }
+
+    // ② NotionにStorageのパスが入ってる場合（例: "posts/xxx.jpg"）
+    return FutureBuilder<String>(
+      future: FirebaseStorage.instance.ref(path).getDownloadURL(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return _loading();
+        }
+        if (snap.hasError || !snap.hasData) {
+          return _placeholder();
+        }
+        return _networkThumb(snap.data!);
+      },
+    );
+  }
+
+  Widget _networkThumb(String url) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        url,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(),
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return _loading();
+        },
+      ),
+    );
+  }
+
+  Widget _loading() {
+    return SizedBox(
+      width: 56,
+      height: 56,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black12,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return SizedBox(
+      width: 56,
+      height: 56,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black12,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.image, size: 24),
+      ),
     );
   }
 }
