@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'profile_edit_screen.dart';
+import 'post_detail_screen.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
   final String userId;
@@ -20,6 +21,68 @@ class ProfileDetailScreen extends StatefulWidget {
 class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   int _refreshKey = 0;
   bool _isSyncingNotion = false;
+  List<Map<String, dynamic>> _userPosts = [];
+  bool _isLoadingPosts = false;
+  String? _postsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserPosts();
+  }
+
+  Future<void> _loadUserPosts() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingPosts = true;
+      _postsError = null;
+    });
+
+    try {
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      final isOwnProfile = currentUserId == widget.userId;
+      
+      HttpsCallableResult result;
+      if (isOwnProfile) {
+        // 自分のプロフィールの場合
+        final callable = FirebaseFunctions.instance.httpsCallable('getMyPosts');
+        result = await callable.call();
+      } else {
+        // 他のユーザーのプロフィールの場合
+        final callable = FirebaseFunctions.instance.httpsCallable('getPostsByUserId');
+        result = await callable.call({'userId': widget.userId});
+      }
+      
+      if (!mounted) return;
+      
+      final data = result.data as Map<String, dynamic>;
+      final success = data['success'] as bool;
+      
+      if (success) {
+        final posts = (data['posts'] as List<dynamic>)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        setState(() {
+          _userPosts = posts;
+        });
+      } else {
+        setState(() {
+          _postsError = data['message'] as String? ?? '記事の取得に失敗しました';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _postsError = 'エラーが発生しました: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingPosts = false;
+        });
+      }
+    }
+  }
 
   Future<DocumentSnapshot<Map<String, dynamic>>> _fetchUserProfile() {
     return FirebaseFirestore.instance
@@ -280,6 +343,108 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     );
   }
 
+  Widget _buildUserPostsSection({required bool isOwnProfile}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                isOwnProfile ? '自分の投稿記事' : '投稿記事',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              if (!_isLoadingPosts)
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 20),
+                  onPressed: _loadUserPosts,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12.0),
+          if (_isLoadingPosts)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_postsError != null)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Text(
+                _postsError!,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            )
+          else if (_userPosts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Text(
+                '投稿記事がありません',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _userPosts.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final post = _userPosts[index];
+                final title = post['title'] as String? ?? '(無題)';
+                final status = post['status'] as String?;
+                
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    title.isEmpty ? '(無題)' : title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: status != null && status.isNotEmpty
+                      ? Text(
+                          'ステータス: $status',
+                          style: const TextStyle(fontSize: 12),
+                        )
+                      : null,
+                  trailing: const Icon(Icons.chevron_right, size: 20),
+                  onTap: () async {
+                    final postId = post['id'] as String?;
+                    if (postId != null) {
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PostDetailScreen(postId: postId),
+                        ),
+                      );
+                      if (result == true) {
+                        _loadUserPosts();
+                      }
+                    }
+                  },
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
@@ -434,6 +599,13 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: _buildNotionSection(isNotionLinked: isNotionLinked),
                   ),
+                
+                // 投稿記事セクション
+                const SizedBox(height: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: _buildUserPostsSection(isOwnProfile: isOwnProfile),
+                ),
                 
                 const SizedBox(height: 32),
               ],

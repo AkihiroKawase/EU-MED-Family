@@ -272,40 +272,55 @@ async function syncUserWithNotion(email: string | undefined, uid: string) {
   }
 
   const client = getNotionClient();
+  
+  // 「アプリユーザーDB」データベースID
+  const appUserDatabaseId = "299aae8f429e8006aabae5f8c7899915";
 
   try {
-    // 1. Notionの全ユーザーを取得
-    const response = await client.users.list({});
-    const notionUsers = response.results;
+    console.log(`Searching for user with email: ${email}`);
 
-    // 2. メールアドレスが一致するユーザーを検索
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const targetNotionUser = notionUsers.find((user: any) => {
-      return user.person && user.person.email === email;
+    // 「アプリユーザーDB」で「Email」プロパティが一致するエントリを検索
+    const dbResponse = await client.databases.query({
+      database_id: appUserDatabaseId,
+      filter: {
+        property: "Email",
+        email: {
+          equals: email,
+        },
+      },
     });
 
-    if (targetNotionUser) {
-      // 3. Firestoreを更新
-      await db.collection("users").doc(uid).set({
-        notionUserId: targetNotionUser.id,
-        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
+    console.log(`Found ${dbResponse.results.length} matching entries`);
 
-          if (targetNotionUser) {
-      const notionUserId = targetNotionUser.id;
+    if (dbResponse.results.length > 0) {
+      const matchedPage = dbResponse.results[0];
 
-      // 3. Firestoreを更新
+      // People型の「Person」プロパティからNotionユーザーIDを取得
+      if (!("properties" in matchedPage)) {
+        console.log("No properties found in matched page");
+        return null;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const props = matchedPage.properties as any;
+      const personProp = props["Person"];
+
+      if (!personProp || personProp.type !== "people" ||
+          !personProp.people || personProp.people.length === 0) {
+        console.log("No Person property found or it is empty");
+        return null;
+      }
+
+      const notionUserId = personProp.people[0].id;
+
+      // Firestoreを更新（notionUserIdフィールドにNotionユーザーIDを保存）
       await db.collection("users").doc(uid).set({
         notionUserId: notionUserId,
-        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSyncedAt: new Date(),
       }, {merge: true});
 
       console.log(`Synced ${email} to Notion User ID: ${notionUserId}`);
       return notionUserId;
-    } else {
-      console.log(`No matching Notion user found for email: ${email}`);
-      return null;
-    }
     } else {
       console.log(`No matching user found in database for email: ${email}`);
       return null;
@@ -347,6 +362,206 @@ export const syncNotionUser = onCall(async (request) => {
 // ===========================================================================
 // Notion Post 関連の Callable Functions
 // ===========================================================================
+
+/**
+ * ヘルパー関数: メールアドレスからNotionユーザーIDを取得
+ * @param {string} email - メールアドレス
+ * @return {Promise<string | null>} Notion User ID または null
+ */
+async function getNotionUserIdByEmail(email: string): Promise<string | null> {
+  const client = getNotionClient();
+  const appUserDatabaseId = "299aae8f429e8006aabae5f8c7899915";
+
+  try {
+    const dbResponse = await client.databases.query({
+      database_id: appUserDatabaseId,
+      filter: {
+        property: "Email",
+        email: {
+          equals: email,
+        },
+      },
+    });
+
+    if (dbResponse.results.length > 0) {
+      const matchedPage = dbResponse.results[0];
+
+      if (!("properties" in matchedPage)) {
+        return null;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const props = matchedPage.properties as any;
+      const personProp = props["Person"];
+
+      if (!personProp || personProp.type !== "people" ||
+          !personProp.people || personProp.people.length === 0) {
+        return null;
+      }
+
+      return personProp.people[0].id;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error getting Notion user ID:", error);
+    return null;
+  }
+}
+
+/**
+ * getMyPosts: ログインユーザーが著者の投稿一覧を取得
+ */
+export const getMyPosts = onCall(async (request) => {
+  // 認証チェック
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "User must be logged in.");
+  }
+
+  const email = request.auth.token.email;
+  if (!email) {
+    return {
+      success: false,
+      posts: [],
+      message: "User has no email.",
+    };
+  }
+
+  // メールアドレスからNotionユーザーIDを取得
+  const notionUserId = await getNotionUserIdByEmail(email);
+  if (!notionUserId) {
+    return {
+      success: false,
+      posts: [],
+      message: "Notion user not found for this email.",
+    };
+  }
+
+  const client = getNotionClient();
+  const databaseId = getNotionDatabaseId();
+
+  try {
+    // 著者がこのNotionユーザーIDを含み、ステータスが「完了」の記事を検索
+    const response = await client.databases.query({
+      database_id: databaseId,
+      filter: {
+        and: [
+          {
+            property: "著者",
+            people: {
+              contains: notionUserId,
+            },
+          },
+          {
+            property: "ステータス",
+            status: {
+              equals: "完了",
+            },
+          },
+        ],
+      },
+      sorts: [
+        {
+          timestamp: "created_time",
+          direction: "descending",
+        },
+      ],
+    });
+
+    const posts: PostData[] = (response.results as PageObjectResponse[])
+      .filter((page): page is PageObjectResponse => "properties" in page)
+      .map(parseNotionPageToPost);
+
+    return {
+      success: true,
+      posts: posts,
+    };
+  } catch (error) {
+    console.error("Error fetching my posts from Notion:", error);
+    throw new HttpsError("internal", "Failed to fetch posts from Notion.");
+  }
+});
+
+/**
+ * getPostsByUserId: 指定したユーザーIDの投稿一覧を取得（ステータス「完了」のみ）
+ */
+export const getPostsByUserId = onCall(async (request) => {
+  // 認証チェック
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "User must be logged in.");
+  }
+
+  const targetUserId = request.data?.userId;
+  if (!targetUserId || typeof targetUserId !== "string") {
+    throw new HttpsError("invalid-argument", "userId is required.");
+  }
+
+  try {
+    // FirestoreからユーザーのnotionUserIdを取得
+    const userDoc = await db.collection("users").doc(targetUserId).get();
+    
+    if (!userDoc.exists) {
+      return {
+        success: false,
+        posts: [],
+        message: "User not found.",
+      };
+    }
+
+    const userData = userDoc.data();
+    const notionUserId = userData?.notionUserId;
+
+    if (!notionUserId) {
+      return {
+        success: false,
+        posts: [],
+        message: "Notion user not linked.",
+      };
+    }
+
+    const client = getNotionClient();
+    const databaseId = getNotionDatabaseId();
+
+    // 著者がこのNotionユーザーIDを含み、ステータスが「完了」の記事を検索
+    const response = await client.databases.query({
+      database_id: databaseId,
+      filter: {
+        and: [
+          {
+            property: "著者",
+            people: {
+              contains: notionUserId,
+            },
+          },
+          {
+            property: "ステータス",
+            status: {
+              equals: "完了",
+            },
+          },
+        ],
+      },
+      sorts: [
+        {
+          timestamp: "created_time",
+          direction: "descending",
+        },
+      ],
+    });
+
+    const posts: PostData[] = (response.results as PageObjectResponse[])
+      .filter((page): page is PageObjectResponse => "properties" in page)
+      .map(parseNotionPageToPost);
+
+    return {
+      success: true,
+      posts: posts,
+    };
+  } catch (error) {
+    console.error("Error fetching posts by user ID:", error);
+    throw new HttpsError("internal", "Failed to fetch posts from Notion.");
+  }
+});
 
 /**
  * getPosts: Notion DBから投稿一覧を取得
