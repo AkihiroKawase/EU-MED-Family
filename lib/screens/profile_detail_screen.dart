@@ -5,6 +5,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'profile_edit_screen.dart';
 import 'post_detail_screen.dart';
+import '../services/notion_post_service.dart';
+import '../models/post.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
   final String userId;
@@ -25,10 +27,66 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   bool _isLoadingPosts = false;
   String? _postsError;
 
+  // いいねした記事リスト
+  List<Post> _likedPosts = [];
+  bool _isLoadingLikedPosts = false;
+  String? _likedPostsError;
+
   @override
   void initState() {
     super.initState();
     _loadUserPosts();
+    _loadLikedPosts();
+  }
+
+  Future<void> _loadLikedPosts() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingLikedPosts = true;
+      _likedPostsError = null;
+    });
+
+    try {
+      // 1. Firestoreからいいねした記事のIDを取得
+      final snapshot = await FirebaseFirestore.instance
+          .collection('post_likes')
+          .where('userId', isEqualTo: widget.userId)
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      final postIds = snapshot.docs.map((doc) => doc['postId'] as String).toList();
+
+      if (postIds.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _likedPosts = [];
+            _isLoadingLikedPosts = false;
+          });
+        }
+        return;
+      }
+
+      // 2. NotionServiceを使って記事詳細を取得
+      final service = NotionPostService();
+      // 並列で取得して高速化
+      final futures = postIds.map((id) => service.fetchPost(id));
+      final posts = await Future.wait(futures);
+
+      if (mounted) {
+        setState(() {
+          _likedPosts = posts;
+          _isLoadingLikedPosts = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading liked posts: $e');
+      if (mounted) {
+        setState(() {
+          _likedPostsError = 'いいねした記事の読み込みに失敗しました';
+          _isLoadingLikedPosts = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadUserPosts() async {
@@ -445,6 +503,95 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     );
   }
 
+  Widget _buildLikedPostsSection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'いいねした投稿',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              if (!_isLoadingLikedPosts)
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 20),
+                  onPressed: _loadLikedPosts,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12.0),
+          if (_isLoadingLikedPosts)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_likedPostsError != null)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Text(
+                _likedPostsError!,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            )
+          else if (_likedPosts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Text(
+                'いいねした記事はありません',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _likedPosts.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final post = _likedPosts[index];
+                
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    post.title.isEmpty ? '(無題)' : post.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.chevron_right, size: 20),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PostDetailScreen(postId: post.id),
+                      ),
+                    );
+                    _loadLikedPosts(); // 戻ってきたら更新（いいね解除などの反映のため）
+                  },
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
@@ -605,6 +752,14 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: _buildUserPostsSection(isOwnProfile: isOwnProfile),
+                ),
+
+                const SizedBox(height: 24),
+
+                // いいねした投稿セクション
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: _buildLikedPostsSection(),
                 ),
                 
                 const SizedBox(height: 32),
