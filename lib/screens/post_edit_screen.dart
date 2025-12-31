@@ -1,7 +1,11 @@
 // lib/screens/post_edit_screen.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 import '../models/post.dart';
 import '../services/notion_post_service.dart';
 
@@ -17,6 +21,7 @@ class PostEditScreen extends StatefulWidget {
 class _PostEditScreenState extends State<PostEditScreen> {
   final _formKey = GlobalKey<FormState>();
   final _notionService = NotionPostService();
+  final _imagePicker = ImagePicker();
 
   late TextEditingController _titleController;
   late TextEditingController _canvaUrlController;
@@ -43,6 +48,11 @@ class _PostEditScreenState extends State<PostEditScreen> {
   // 保存中フラグ（連打防止）
   bool _isSaving = false;
 
+  // 画像関連
+  File? _selectedImage;
+  String? _existingImageUrl;
+  bool _imageChanged = false;
+
   bool get _isEdit => widget.post != null;
 
   @override
@@ -65,6 +75,11 @@ class _PostEditScreenState extends State<PostEditScreen> {
 
     _firstCheck = widget.post?.firstCheck ?? false;
     _secondCheck = widget.post?.secondCheck ?? false;
+
+    // 既存の画像URLを取得（1枚目のみ）
+    if (widget.post?.fileUrls.isNotEmpty == true) {
+      _existingImageUrl = widget.post!.fileUrls.first;
+    }
 
     // Notion連携状態をチェック
     _checkNotionLinkStatus();
@@ -113,6 +128,55 @@ class _PostEditScreenState extends State<PostEditScreen> {
     super.dispose();
   }
 
+  Future<void> _pickImage() async {
+    try {
+      // 通信量節約のため、画像を圧縮・リサイズ
+      final XFile? pickedFile = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 60, // 50〜70程度で圧縮
+      );
+      
+      if (pickedFile != null) {
+        setState(() {
+          _selectedImage = File(pickedFile.path);
+          _imageChanged = true;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('画像の選択に失敗しました: $e')),
+        );
+      }
+    }
+  }
+
+  void _removeImage() {
+    setState(() {
+      _selectedImage = null;
+      _existingImageUrl = null;
+      _imageChanged = true;
+    });
+  }
+
+  Future<String?> _uploadImage(File file) async {
+    try {
+      final uuid = const Uuid().v4();
+      final extension = file.path.split('.').last;
+      final fileName = 'image_$uuid.$extension';
+      final path = 'posts/$uuid/$fileName';
+
+      final ref = FirebaseStorage.instance.ref().child(path);
+      final uploadTask = await ref.putFile(file);
+      return await uploadTask.ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('Image upload error: $e');
+      return null;
+    }
+  }
+
   Future<void> _save() async {
     // 保存中の場合は何もしない（連打防止）
     if (_isSaving) return;
@@ -124,50 +188,68 @@ class _PostEditScreenState extends State<PostEditScreen> {
       _isSaving = true;
     });
 
-    // Categoryはプルダウンで選択した値を配列に
-    final categories = _selectedCategory != null ? [_selectedCategory!] : <String>[];
-
-    final title = _titleController.text.trim();
-    final canvaUrlText = _canvaUrlController.text.trim();
-    final statusText = _statusController.text.trim();
-
-    final post = Post(
-      id: widget.post?.id ?? '', // 新規時は空文字で OK（upsert 側で create する想定）
-      title: title,
-      firstCheck: _firstCheck,
-      canvaUrl: canvaUrlText.isEmpty ? null : canvaUrlText,
-      categories: categories,
-      secondCheck: _secondCheck,
-      // ここはアプリ側では編集しない前提で、既存値を引き継ぐ
-      secondCheckAssignees:
-          widget.post?.secondCheckAssignees ?? <String>[],
-      status: statusText.isEmpty ? null : statusText,
-      fileUrls: widget.post?.fileUrls ?? <String>[],
-      authors: widget.post?.authors ?? <String>[],
-      createdTime: widget.post?.createdTime,
-      lastEditedTime: widget.post?.lastEditedTime,
-    );
-
     try {
-      // NotionPostService 側の upsertPost は
-      // 新しい Post モデルに合わせて実装してある前提
-      await _notionService.upsertPost(post, isUpdate: _isEdit);
+      // 画像のアップロード処理
+      List<String>? newFileUrls;
+      
+      if (_imageChanged) {
+        if (_selectedImage != null) {
+          // 新しい画像をアップロード
+          final uploadedUrl = await _uploadImage(_selectedImage!);
+          if (uploadedUrl != null) {
+            newFileUrls = [uploadedUrl];
+          } else {
+            throw Exception('画像のアップロードに失敗しました');
+          }
+        } else {
+          // 画像が削除された場合は空の配列
+          newFileUrls = [];
+        }
+      }
+
+      // Categoryはプルダウンで選択した値を配列に
+      final categories = _selectedCategory != null ? [_selectedCategory!] : <String>[];
+
+      final title = _titleController.text.trim();
+      final canvaUrlText = _canvaUrlController.text.trim();
+      final statusText = _statusController.text.trim();
+
+      final post = Post(
+        id: widget.post?.id ?? '',
+        title: title,
+        firstCheck: _firstCheck,
+        canvaUrl: canvaUrlText.isEmpty ? null : canvaUrlText,
+        categories: categories,
+        secondCheck: _secondCheck,
+        secondCheckAssignees: widget.post?.secondCheckAssignees ?? <String>[],
+        status: statusText.isEmpty ? null : statusText,
+        fileUrls: widget.post?.fileUrls ?? <String>[],
+        authors: widget.post?.authors ?? <String>[],
+        createdTime: widget.post?.createdTime,
+        lastEditedTime: widget.post?.lastEditedTime,
+      );
+
+      // NotionPostService の upsertPost を呼び出し（新しいファイルURLを渡す）
+      await _notionService.upsertPost(
+        post,
+        isUpdate: _isEdit,
+        newFileUrls: newFileUrls,
+      );
+      
       if (mounted) {
-        Navigator.of(context).pop(true); // 保存成功を親に伝える
+        Navigator.of(context).pop(true);
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('保存に失敗しました: $e')),
       );
-      // エラー時のみ保存フラグをリセット（成功時は画面遷移するのでリセット不要）
       setState(() {
         _isSaving = false;
       });
     }
   }
 
-  // Notion未連携時の保存試行時にメッセージを表示
   void _showNotionLinkRequiredMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -178,9 +260,148 @@ class _PostEditScreenState extends State<PostEditScreen> {
     );
   }
 
+  Widget _buildImageSection() {
+    final hasImage = _selectedImage != null || 
+        (_existingImageUrl != null && _existingImageUrl!.isNotEmpty);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'サムネイル画像',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: _isSaving ? null : _pickImage,
+            child: Container(
+              height: 200,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.grey[300]!,
+                  width: 1,
+                ),
+              ),
+              child: hasImage
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(11),
+                          child: _selectedImage != null
+                              ? Image.file(
+                                  _selectedImage!,
+                                  fit: BoxFit.cover,
+                                )
+                              : Image.network(
+                                  _existingImageUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => _buildImagePlaceholder(),
+                                ),
+                        ),
+                        // 削除ボタン
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: GestureDetector(
+                            onTap: _isSaving ? null : _removeImage,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 変更ボタン
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.camera_alt,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  '変更',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : _buildImagePlaceholder(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePlaceholder() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.add_photo_alternate_outlined,
+          size: 48,
+          color: Colors.grey[400],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'タップして画像を選択',
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '推奨: 16:9 の横長画像',
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 投稿可能かどうか（連携チェック中または連携済みでないと投稿不可、保存中も不可）
     final canPost = !_isCheckingNotionLink && _isNotionLinked && !_isSaving;
 
     return Scaffold(
@@ -208,164 +429,196 @@ class _PostEditScreenState extends State<PostEditScreen> {
                 ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              // Notion未連携警告
-              if (!_isCheckingNotionLink && !_isNotionLinked)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    border: Border.all(color: Colors.orange.shade200),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.warning, color: Colors.orange.shade700),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Notionと連携していないため投稿できません。\nプロフィール画面から連携してください。',
-                          style: TextStyle(
-                            color: Colors.orange.shade900,
-                            fontSize: 13,
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                children: [
+                  // Notion未連携警告
+                  if (!_isCheckingNotionLink && !_isNotionLinked)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        border: Border.all(color: Colors.orange.shade200),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning, color: Colors.orange.shade700),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Notionと連携していないため投稿できません。\nプロフィール画面から連携してください。',
+                              style: TextStyle(
+                                color: Colors.orange.shade900,
+                                fontSize: 13,
+                              ),
+                            ),
                           ),
+                        ],
+                      ),
+                    ),
+
+                  // 連携チェック中のインジケーター
+                  if (_isCheckingNotionLink)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
+                      child: Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: 8),
+                            Text('連携状態を確認中...'),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
+                    ),
 
-              // 連携チェック中のインジケーター
-              if (_isCheckingNotionLink)
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 16),
-                  child: Center(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        SizedBox(width: 8),
-                        Text('連携状態を確認中...'),
-                      ],
+                  // 画像選択セクション
+                  _buildImageSection(),
+
+                  // タイトル
+                  TextFormField(
+                    controller: _titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'タイトル',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'タイトルを入力してください';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Canva URL
+                  TextFormField(
+                    controller: _canvaUrlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Canva URL',
+                      hintText: 'https://...',
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 16),
 
-              // タイトル
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'タイトル',
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'タイトルを入力してください';
-                  }
-                  return null;
-                },
+                  // Category（プルダウン）
+                  DropdownButtonFormField<String>(
+                    value: _selectedCategory,
+                    decoration: const InputDecoration(
+                      labelText: 'Category',
+                      border: OutlineInputBorder(),
+                    ),
+                    hint: const Text('カテゴリを選択'),
+                    items: _categoryOptions.map((category) {
+                      return DropdownMenuItem<String>(
+                        value: category,
+                        child: Text(category),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedCategory = value;
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'カテゴリを選択してください';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ステータス（テキスト入力）
+                  TextFormField(
+                    controller: _statusController,
+                    decoration: const InputDecoration(
+                      labelText: 'ステータス',
+                      hintText: '例: 未着手 / チェック中 / 完了',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 1st check
+                  SwitchListTile(
+                    title: const Text('1st check'),
+                    value: _firstCheck,
+                    onChanged: (v) {
+                      setState(() => _firstCheck = v);
+                    },
+                  ),
+
+                  // Check ②
+                  SwitchListTile(
+                    title: const Text('Check ②'),
+                    value: _secondCheck,
+                    onChanged: (v) {
+                      setState(() => _secondCheck = v);
+                    },
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  ElevatedButton.icon(
+                    onPressed: canPost ? _save : (_isNotionLinked ? null : _showNotionLinkRequiredMessage),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: canPost ? null : Colors.grey.shade300,
+                      foregroundColor: canPost ? null : Colors.grey.shade600,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.check),
+                    label: Text(_isSaving 
+                        ? '保存中...' 
+                        : (_isEdit ? '更新する' : '投稿する')),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-
-              // Canva URL
-              TextFormField(
-                controller: _canvaUrlController,
-                decoration: const InputDecoration(
-                  labelText: 'Canva URL',
-                  hintText: 'https://...',
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Category（プルダウン）
-              DropdownButtonFormField<String>(
-                value: _selectedCategory,
-                decoration: const InputDecoration(
-                  labelText: 'Category',
-                  border: OutlineInputBorder(),
-                ),
-                hint: const Text('カテゴリを選択'),
-                items: _categoryOptions.map((category) {
-                  return DropdownMenuItem<String>(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedCategory = value;
-                  });
-                },
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'カテゴリを選択してください';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // ステータス（テキスト入力）
-              TextFormField(
-                controller: _statusController,
-                decoration: const InputDecoration(
-                  labelText: 'ステータス',
-                  hintText: '例: 未着手 / チェック中 / 完了',
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // 1st check
-              SwitchListTile(
-                title: const Text('1st check'),
-                value: _firstCheck,
-                onChanged: (v) {
-                  setState(() => _firstCheck = v);
-                },
-              ),
-
-              // Check ②
-              SwitchListTile(
-                title: const Text('Check ②'),
-                value: _secondCheck,
-                onChanged: (v) {
-                  setState(() => _secondCheck = v);
-                },
-              ),
-
-              const SizedBox(height: 24),
-
-              ElevatedButton.icon(
-                onPressed: canPost ? _save : (_isNotionLinked ? null : _showNotionLinkRequiredMessage),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: canPost ? null : Colors.grey.shade300,
-                  foregroundColor: canPost ? null : Colors.grey.shade600,
-                ),
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Icon(Icons.check),
-                label: Text(_isSaving 
-                    ? '保存中...' 
-                    : (_isEdit ? '更新する' : '投稿する')),
-              ),
-            ],
+            ),
           ),
-        ),
+          // 保存中のオーバーレイ
+          if (_isSaving)
+            Container(
+              color: Colors.black.withOpacity(0.3),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      '保存中...',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

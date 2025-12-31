@@ -79,9 +79,11 @@ class NotionPostService {
   ///
   /// - [isUpdate] が true かつ post.id が空でない → 更新
   /// - それ以外 → 新規作成
+  /// - [newFileUrls] が指定されている場合、そのURLをNotionに保存する
   Future<void> upsertPost(
     Post post, {
     required bool isUpdate,
+    List<String>? newFileUrls,
   }) async {
     try {
       final callable = _functions.httpsCallable('upsertPost');
@@ -98,6 +100,11 @@ class NotionPostService {
       // 更新時のみ id を含める
       if (isUpdate && post.id.isNotEmpty) {
         payload['id'] = post.id;
+      }
+
+      // 新しいファイルURLがある場合は追加
+      if (newFileUrls != null && newFileUrls.isNotEmpty) {
+        payload['fileUrls'] = newFileUrls;
       }
 
       final result = await callable.call(payload);

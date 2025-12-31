@@ -65,7 +65,6 @@ class _PostListScreenState extends State<PostListScreen> {
     }
 
     final list = set.toList()..sort();
-    // 未設定は最後に回す（好み）
     if (list.remove('未設定')) list.add('未設定');
     return list;
   }
@@ -79,8 +78,10 @@ class _PostListScreenState extends State<PostListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text('投稿一覧'),
+        elevation: 0,
       ),
       body: RefreshIndicator(
         onRefresh: _reload,
@@ -88,124 +89,116 @@ class _PostListScreenState extends State<PostListScreen> {
           future: _futurePosts,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return ListView(
-                children: const [
-                  SizedBox(
-                    height: 200,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                ],
-              );
+              return const Center(child: CircularProgressIndicator());
             }
 
             if (snapshot.hasError) {
-              return ListView(
-                children: [
-                  SizedBox(
-                    height: 200,
-                    child: Center(
-                      child: Text('エラーが発生しました: ${snapshot.error}'),
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, size: 48, color: Colors.grey[400]),
+                    const SizedBox(height: 16),
+                    Text(
+                      'エラーが発生しました',
+                      style: TextStyle(color: Colors.grey[600]),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed: _reload,
+                      child: const Text('再読み込み'),
+                    ),
+                  ],
+                ),
               );
             }
 
             final posts = snapshot.data ?? [];
 
             if (posts.isEmpty) {
-              return ListView(
-                children: const [
-                  SizedBox(
-                    height: 200,
-                    child: Center(child: Text('投稿がありません')),
-                  ),
-                ],
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.article_outlined, size: 64, color: Colors.grey[400]),
+                    const SizedBox(height: 16),
+                    Text(
+                      '投稿がありません',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '右下のボタンから新規投稿できます',
+                      style: TextStyle(
+                        color: Colors.grey[400],
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
               );
             }
 
             final categories = _buildCategoryOptions(posts);
             final filteredPosts = _filterPosts(posts);
 
-            // 先頭(チップ領域) + 投稿リスト(filteredPosts)
-            return ListView.separated(
-              itemCount: 1 + filteredPosts.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                // --- 先頭はチップ領域 ---
-                if (index == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            return CustomScrollView(
+              slivers: [
+                // カテゴリフィルター
+                SliverToBoxAdapter(
+                  child: Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ChoiceChip(
-                              label: const Text('すべて'),
-                              selected: _selectedCategory == null,
-                              onSelected: (_) => setState(() => _selectedCategory = null),
-                            ),
-                            ...categories.map((c) => ChoiceChip(
-                                  label: Text(c),
-                                  selected: _selectedCategory == c,
-                                  onSelected: (_) => setState(() => _selectedCategory = c),
-                                )),
-                          ],
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _buildCategoryChip(
+                                label: 'すべて',
+                                isSelected: _selectedCategory == null,
+                                onTap: () => setState(() => _selectedCategory = null),
+                              ),
+                              ...categories.map((c) => _buildCategoryChip(
+                                    label: c,
+                                    isSelected: _selectedCategory == c,
+                                    onTap: () => setState(() => _selectedCategory = c),
+                                  )),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '表示: ${filteredPosts.length}件',
-                          style: Theme.of(context).textTheme.bodySmall,
+                          '${filteredPosts.length}件の記事',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
-                  );
-                }
-
-                // --- ここから投稿リスト ---
-                final post = filteredPosts[index - 1];
-
-                final statusText = post.status ?? '';
-                // ★ ここが修正ポイント：表示側も正規化カテゴリを使う（消えない）
-                final categoryText = _normalizeCategory(post);
-                final authorText = post.firstAuthor ?? '';
-
-                // 1行目用のテキスト（ステータス / カテゴリ）
-                final metaLine = [
-                  if (statusText.isNotEmpty) 'ステータス: $statusText',
-                  'カテゴリ: $categoryText', // ← 常に表示（未設定も含む）
-                ].join(' / ');
-
-                return ListTile(
-                  title: Text(post.title.isEmpty ? '(無題)' : post.title),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        metaLine,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      if (authorText.isNotEmpty)
-                        Text(
-                          '著者: $authorText',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
-                    ],
                   ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _goToDetail(post),
-                );
-              },
+                ),
+
+                // 投稿リスト
+                SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final post = filteredPosts[index];
+                        return _buildPostCard(post);
+                      },
+                      childCount: filteredPosts.length,
+                    ),
+                  ),
+                ),
+              ],
             );
           },
         ),
@@ -216,5 +209,204 @@ class _PostListScreenState extends State<PostListScreen> {
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 0),
     );
+  }
+
+  Widget _buildCategoryChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? Theme.of(context).primaryColor : Colors.grey[100],
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.white : Colors.grey[700],
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPostCard(Post post) {
+    final categoryText = _normalizeCategory(post);
+    final authorText = post.firstAuthor ?? '';
+    final hasImage = post.fileUrls.isNotEmpty;
+    final imageUrl = hasImage ? post.fileUrls.first : null;
+
+    return GestureDetector(
+      onTap: () => _goToDetail(post),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左側: テキスト情報
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // カテゴリタグ
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getCategoryColor(categoryText).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        categoryText,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: _getCategoryColor(categoryText),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // タイトル
+                    Text(
+                      post.title.isEmpty ? '(無題)' : post.title,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    // メタ情報
+                    Row(
+                      children: [
+                        if (authorText.isNotEmpty) ...[
+                          Icon(
+                            Icons.person_outline,
+                            size: 14,
+                            color: Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              authorText,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                        if (post.status != null && post.status!.isNotEmpty) ...[
+                          if (authorText.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              child: Text(
+                                '•',
+                                style: TextStyle(color: Colors.grey[400]),
+                              ),
+                            ),
+                          Text(
+                            post.status!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 右側: サムネイル画像
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: 88,
+                  height: 88,
+                  color: Colors.grey[200],
+                  child: hasImage && imageUrl != null
+                      ? Image.network(
+                          imageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _buildThumbnailPlaceholder(),
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                value: loadingProgress.expectedTotalBytes != null
+                                    ? loadingProgress.cumulativeBytesLoaded /
+                                        loadingProgress.expectedTotalBytes!
+                                    : null,
+                              ),
+                            );
+                          },
+                        )
+                      : _buildThumbnailPlaceholder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThumbnailPlaceholder() {
+    return Container(
+      color: Colors.grey[200],
+      child: Icon(
+        Icons.article_outlined,
+        size: 32,
+        color: Colors.grey[400],
+      ),
+    );
+  }
+
+  Color _getCategoryColor(String category) {
+    switch (category) {
+      case '国内実習':
+        return Colors.blue;
+      case '海外実習':
+        return Colors.green;
+      case '大学紹介':
+        return Colors.purple;
+      case 'マッチング':
+        return Colors.orange;
+      case 'その他':
+        return Colors.teal;
+      default:
+        return Colors.grey;
+    }
   }
 }
