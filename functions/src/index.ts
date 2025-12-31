@@ -92,6 +92,7 @@ interface PostData {
   // ✅ 追加：詳細表示用
   secondCheckAssignees: string[];
   authors: string[];
+  authorIds: string[]; // 著者のNotionユーザーID
   fileUrls: string[];
 
   status: string | null;
@@ -166,6 +167,16 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
       .filter((name: string) => name.length > 0);
   };
 
+  // ✅ people: IDを取得
+  const getPeopleIds = (key: string): string[] => {
+    const prop = props[key];
+    if (!prop || prop.type !== "people") return [];
+    const people = prop.people ?? [];
+    return people
+      .map((p: any) => p?.id ?? "")
+      .filter((id: string) => id.length > 0);
+  };
+
   // ✅ files: prop.files は配列。file/external の url を取る
   const getFileUrls = (key: string): string[] => {
     const prop = props[key];
@@ -200,6 +211,7 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
 
     secondCheckAssignees: getPeopleNames("Check ② 担当"),
     authors: getPeopleNames("著者"),
+    authorIds: getPeopleIds("著者"),
     fileUrls: getFileUrls("fileUrls"),
 
     status: getStatusName("ステータス"),
