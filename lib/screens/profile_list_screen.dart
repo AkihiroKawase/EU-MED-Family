@@ -22,12 +22,62 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   bool _isSyncingNotion = false;
 
   // 絞り込み候補
-  final List<String> _countries = ['指定なし', 'ハンガリー', 'チェコ', 'スロバキア', 'ポーランド', '日本', 'アメリカ'];
-  final List<String> _schools = ['指定なし', 'デブレツェン大学', 'ペーチ大学', 'セゲド大学', 'センメルワイス大学'];
-  final List<String> _grades = ['指定なし', '1年生', '2年生', '3年生', '4年生', '5年生', '6年生'];
+  List<String> _countries = ['指定なし'];
+  List<String> _schools = ['指定なし'];
+  List<String> _grades = ['指定なし'];
   
   // Repository
   final NotionRepository _notionRepository = NotionRepository();
+  
+  @override
+  void initState() {
+    super.initState();
+    _fetchFilterOptions(); // Firestoreから選択肢を取得
+  }
+
+  /// Firestoreから全ユーザーを取得して、絞り込み項目のリストを生成する
+  Future<void> _fetchFilterOptions() async {
+    try {
+      // ユーザー数が少ないため、全件取得してクライアント側で集計
+      final snapshot = await FirebaseFirestore.instance.collection('users').get();
+
+      // Setを使って重複を排除
+      final countriesSet = <String>{};
+      final schoolsSet = <String>{};
+      final gradesSet = <String>{};
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        
+        final country = data['currentCountry'] as String?;
+        if (country != null && country.isNotEmpty && country != '未設定') {
+          countriesSet.add(country);
+        }
+
+        final school = data['school'] as String?;
+        if (school != null && school.isNotEmpty && school != '未設定') {
+          schoolsSet.add(school);
+        }
+
+        final grade = data['grade'] as String?;
+        if (grade != null && grade.isNotEmpty && grade != '未設定') {
+          gradesSet.add(grade);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          // リストに変換してソートし、「指定なし」を先頭に追加
+          _countries = ['指定なし', ...countriesSet.toList()..sort()];
+          _schools = ['指定なし', ...schoolsSet.toList()..sort()];
+          _grades = ['指定なし', ...gradesSet.toList()..sort()];
+        });
+      }
+    } catch (e) {
+      debugPrint('フィルタオプションの取得に失敗しました: $e');
+      // エラー時は初期値（指定なし）のまま動作するので、ユーザーへの影響は最小限
+    }
+  }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getUsersStream() {
     // 未認証の場合は空のStreamを返す（ログアウト時のpermission-deniedエラー防止）
@@ -37,25 +87,40 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
     
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection('users');
 
-    // 絞り込み条件を追加
+    // =========================================================================
+    // 【重要】インデックスに関する注意点
+    // 以下の「where（絞り込み）」と「orderBy（並び替え）」を同時に使う場合、
+    // Firestoreの「複合インデックス」が必須となります。
+    //
+    // もしアプリ操作中に赤い画面のエラーが出たら、デバッグコンソールに表示される
+    // URL（https://console.firebase...）をクリックしてインデックスを作成してください。
+    // ※ 絞り込み条件の組み合わせ（国だけ、国＋大学、など）ごとに作成が必要です。
+    // =========================================================================
+
+    // 1. 国で絞り込み
     if (_selectedCountry != null && _selectedCountry != '指定なし') {
       query = query.where('currentCountry', isEqualTo: _selectedCountry);
     }
+    
+    // 2. 大学で絞り込み
     if (_selectedSchool != null && _selectedSchool != '指定なし') {
       query = query.where('school', isEqualTo: _selectedSchool);
     }
+    
+    // 3. 学年で絞り込み
     if (_selectedGrade != null && _selectedGrade != '指定なし') {
       query = query.where('grade', isEqualTo: _selectedGrade);
     }
 
     // キーワード検索
     if (_searchQuery.isNotEmpty) {
-      // キーワード検索時は範囲クエリを使用（orderByは使用しない）
+      // キーワード検索時は範囲クエリを使用（仕様上、この場合はcreatedAt順にはできません）
       query = query
           .where('displayName', isGreaterThanOrEqualTo: _searchQuery)
           .where('displayName', isLessThanOrEqualTo: _searchQuery + '\uf8ff');
     } else {
-      // キーワード検索がない場合は作成日順でソート
+      // キーワード検索がない場合のみ、作成日順（新しい順）で並べる
+      // ★ ここが where と組み合わさることでインデックスが必要になります
       query = query.orderBy('createdAt', descending: true);
     }
 
