@@ -3,6 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 
@@ -53,12 +54,122 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   bool _isLiked = false;
   Stream<QuerySnapshot>? _likesStream;
 
+  // コメント機能用の状態変数
+  final _commentController = TextEditingController();
+  bool _isSubmittingComment = false;
+  Map<String, dynamic>? _currentUserData;
+  Stream<QuerySnapshot>? _commentsStream;
+
   @override
   void initState() {
     super.initState();
     _futurePost = _notionService.fetchPost(widget.postId);
     _loadCurrentUserNotionId();
     _initLikeStatus();
+    _initCommentStatus();
+    _fetchCurrentUserInfo();
+    _commentController.addListener(() {
+      setState(() {}); // 文字数カウントなどの更新のため
+    });
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  void _initCommentStatus() {
+    _commentsStream = FirebaseFirestore.instance
+        .collection('post_comments')
+        .where('postId', isEqualTo: widget.postId)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<void> _fetchCurrentUserInfo() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (mounted && doc.exists) {
+        setState(() {
+          _currentUserData = doc.data();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching user info: $e');
+    }
+  }
+
+  Future<void> _submitComment() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ログインが必要です')),
+      );
+      return;
+    }
+
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+    if (text.length > 500) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('コメントは500文字以内で入力してください')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmittingComment = true;
+    });
+
+    try {
+      // ユーザー情報の取得（キャッシュがない場合）
+      String userName = 'Unknown User';
+      String userIconUrl = '';
+      
+      if (_currentUserData != null) {
+        userName = _currentUserData?['displayName'] ?? 'Unknown User';
+        userIconUrl = _currentUserData?['profileImageUrl'] ?? '';
+      } else {
+        // フォールバック: 再取得試行
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        if (doc.exists) {
+           userName = doc.data()?['displayName'] ?? 'Unknown User';
+           userIconUrl = doc.data()?['profileImageUrl'] ?? '';
+           _currentUserData = doc.data();
+        }
+      }
+
+      await FirebaseFirestore.instance.collection('post_comments').add({
+        'postId': widget.postId,
+        'userId': user.uid,
+        'userName': userName,
+        'userIconUrl': userIconUrl,
+        'text': text,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      _commentController.clear();
+      if (mounted) {
+        FocusScope.of(context).unfocus(); // キーボードを閉じる
+      }
+    } catch (e) {
+      debugPrint('Error submitting comment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('コメントの送信に失敗しました')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingComment = false;
+        });
+      }
+    }
   }
 
   /// いいね機能の初期化
@@ -280,6 +391,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: true, // キーボード表示時に入力欄を押し上げる
       body: FutureBuilder<Post>(
         future: _futurePost,
         builder: (context, snapshot) {
@@ -306,262 +418,472 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ? post.categories.first 
               : '未設定';
 
-          return CustomScrollView(
-            slivers: [
-              // ヘッダー画像付きAppBar
-              SliverAppBar(
-                expandedHeight: hasHeaderImage ? 250 : 0,
-                pinned: true,
-                backgroundColor: Colors.white,
-                foregroundColor: hasHeaderImage ? Colors.white : null,
-                flexibleSpace: hasHeaderImage
-                    ? FlexibleSpaceBar(
-                        background: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.network(
-                              headerImageUrl!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                color: Colors.grey[300],
-                                child: Icon(
-                                  Icons.image_not_supported,
-                                  size: 64,
-                                  color: Colors.grey[500],
-                                ),
-                              ),
-                            ),
-                            // グラデーションオーバーレイ
-                            Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.black.withOpacity(0.3),
-                                    Colors.transparent,
-                                    Colors.black.withOpacity(0.5),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : null,
-                actions: [
-                  if (_canEditPost(post))
-                    IconButton(
-                      icon: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: hasHeaderImage
-                              ? Colors.black.withOpacity(0.3)
-                              : Colors.grey[100],
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.edit,
-                          size: 20,
-                          color: hasHeaderImage ? Colors.white : Colors.grey[700],
-                        ),
-                      ),
-                      onPressed: () => _goToEdit(post),
-                    ),
-                ],
-              ),
-
-              // コンテンツ
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // カテゴリ & ステータス
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _getCategoryColor(categoryText).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              categoryText,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: _getCategoryColor(categoryText),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // タイトル
-                      Text(
-                        post.title.isEmpty ? '(無題)' : post.title,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // メタ情報（著者・日付）
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          children: [
-                            // 著者
-                            if (post.authors.isNotEmpty)
-                              _buildMetaRow(
-                                icon: Icons.person_outline,
-                                label: '著者',
-                                value: post.authors.join(', '),
-                              ),
-                            // 投稿日
-                            if (post.createdTime != null) ...[
-                              if (post.authors.isNotEmpty)
-                                const Divider(height: 24),
-                              _buildMetaRow(
-                                icon: Icons.calendar_today_outlined,
-                                label: '投稿日',
-                                value: _formatDate(post.createdTime),
-                              ),
-                            ],
-                            // 更新日
-                            if (post.lastEditedTime != null) ...[
-                              const Divider(height: 24),
-                              _buildMetaRow(
-                                icon: Icons.update,
-                                label: '更新日',
-                                value: _formatDate(post.lastEditedTime),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      // いいねボタン
-                      StreamBuilder<QuerySnapshot>(
-                        stream: _likesStream,
-                        builder: (context, snapshot) {
-                          final likeCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
-                          final color = _isLiked ? Colors.red : Colors.grey;
-                          final bgColor = _isLiked ? Colors.red.withOpacity(0.1) : Colors.grey[100];
-
-                          return GestureDetector(
-                            onTap: _toggleLike,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: bgColor,
-                                borderRadius: BorderRadius.circular(30),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+          return Column(
+            children: [
+              Expanded(
+                child: CustomScrollView(
+                  slivers: [
+                    // ヘッダー画像付きAppBar
+                    SliverAppBar(
+                      expandedHeight: hasHeaderImage ? 250 : 0,
+                      pinned: true,
+                      backgroundColor: Colors.white,
+                      foregroundColor: hasHeaderImage ? Colors.white : null,
+                      flexibleSpace: hasHeaderImage
+                          ? FlexibleSpaceBar(
+                              background: Stack(
+                                fit: StackFit.expand,
                                 children: [
-                                  Icon(
-                                    _isLiked ? Icons.favorite : Icons.favorite_border,
-                                    color: color,
-                                    size: 24,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '$likeCount',
-                                    style: TextStyle(
-                                      color: color,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
+                                  Image.network(
+                                    headerImageUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.grey[300],
+                                      child: Icon(
+                                        Icons.image_not_supported,
+                                        size: 64,
+                                        color: Colors.grey[500],
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'いいね！',
-                                    style: TextStyle(
-                                      color: color,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
+                                  // グラデーションオーバーレイ
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Colors.black.withOpacity(0.3),
+                                          Colors.transparent,
+                                          Colors.black.withOpacity(0.5),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 24),
-
-
-                      // ファイル&メディア（ヘッダー以外のファイル）
-                      if (post.fileUrls.length > 1) ...[
-                        _buildSectionTitle('添付ファイル'),
-                        const SizedBox(height: 12),
-                        ...post.fileUrls.skip(1).map((u) {
-                          final name = _fileNameFromUrl(u);
-                          final isPdf = name.toLowerCase().endsWith('.pdf');
-                          return _buildFileCard(
-                            name: name,
-                            icon: isPdf ? Icons.picture_as_pdf : Icons.attach_file,
-                            iconColor: isPdf ? Colors.red : Colors.blue,
-                            onTap: () => _openUrl(u),
-                          );
-                        }),
-                        const SizedBox(height: 24),
-                      ],
-
-                      // Canva リンク
-                      if (post.canvaUrl != null && post.canvaUrl!.isNotEmpty) ...[
-                        _buildSectionTitle('Canva デザイン'),
-                        const SizedBox(height: 12),
-                        // Canva リンク
-                        _buildLinkCard(
-                          title: 'Canvaで開く',
-                          subtitle: 'タップして表示', // 文言も「外部ブラウザ」から変更すると親切です
-                          icon: Icons.design_services,
-                          iconColor: Colors.purple,
-                          // ここで true を渡す
-                          onTap: () => _openUrl(post.canvaUrl!, forceInApp: true),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-
-                      // 編集ボタン（著者のみ表示）
-                      if (_canEditPost(post))
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: () => _goToEdit(post),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                            )
+                          : null,
+                      actions: [
+                        if (_canEditPost(post))
+                          IconButton(
+                            icon: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: hasHeaderImage
+                                    ? Colors.black.withOpacity(0.3)
+                                    : Colors.grey[100],
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.edit,
+                                size: 20,
+                                color: hasHeaderImage ? Colors.white : Colors.grey[700],
                               ),
                             ),
-                            icon: const Icon(Icons.edit),
-                            label: const Text('編集する'),
+                            onPressed: () => _goToEdit(post),
                           ),
+                      ],
+                    ),
+
+                    // コンテンツ
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // カテゴリ & ステータス
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _getCategoryColor(categoryText).withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    categoryText,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: _getCategoryColor(categoryText),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+
+                            // タイトル
+                            Text(
+                              post.title.isEmpty ? '(無題)' : post.title,
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // メタ情報（著者・日付）
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                children: [
+                                  // 著者
+                                  if (post.authors.isNotEmpty)
+                                    _buildMetaRow(
+                                      icon: Icons.person_outline,
+                                      label: '著者',
+                                      value: post.authors.join(', '),
+                                    ),
+                                  // 投稿日
+                                  if (post.createdTime != null) ...[
+                                    if (post.authors.isNotEmpty)
+                                      const Divider(height: 24),
+                                    _buildMetaRow(
+                                      icon: Icons.calendar_today_outlined,
+                                      label: '投稿日',
+                                      value: _formatDate(post.createdTime),
+                                    ),
+                                  ],
+                                  // 更新日
+                                  if (post.lastEditedTime != null) ...[
+                                    const Divider(height: 24),
+                                    _buildMetaRow(
+                                      icon: Icons.update,
+                                      label: '更新日',
+                                      value: _formatDate(post.lastEditedTime),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+
+                            // いいねボタン
+                            StreamBuilder<QuerySnapshot>(
+                              stream: _likesStream,
+                              builder: (context, snapshot) {
+                                final likeCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                                final color = _isLiked ? Colors.red : Colors.grey;
+                                final bgColor = _isLiked ? Colors.red.withOpacity(0.1) : Colors.grey[100];
+
+                                return GestureDetector(
+                                  onTap: _toggleLike,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: bgColor,
+                                      borderRadius: BorderRadius.circular(30),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          _isLiked ? Icons.favorite : Icons.favorite_border,
+                                          color: color,
+                                          size: 24,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '$likeCount',
+                                          style: TextStyle(
+                                            color: color,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'いいね！',
+                                          style: TextStyle(
+                                            color: color,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 24),
+
+
+                            // ファイル&メディア（ヘッダー以外のファイル）
+                            if (post.fileUrls.length > 1) ...[
+                              _buildSectionTitle('添付ファイル'),
+                              const SizedBox(height: 12),
+                              ...post.fileUrls.skip(1).map((u) {
+                                final name = _fileNameFromUrl(u);
+                                final isPdf = name.toLowerCase().endsWith('.pdf');
+                                return _buildFileCard(
+                                  name: name,
+                                  icon: isPdf ? Icons.picture_as_pdf : Icons.attach_file,
+                                  iconColor: isPdf ? Colors.red : Colors.blue,
+                                  onTap: () => _openUrl(u),
+                                );
+                              }),
+                              const SizedBox(height: 24),
+                            ],
+
+                            // Canva リンク
+                            if (post.canvaUrl != null && post.canvaUrl!.isNotEmpty) ...[
+                              _buildSectionTitle('Canva デザイン'),
+                              const SizedBox(height: 12),
+                              // Canva リンク
+                              _buildLinkCard(
+                                title: 'Canvaで開く',
+                                subtitle: 'タップして表示', // 文言も「外部ブラウザ」から変更すると親切です
+                                icon: Icons.design_services,
+                                iconColor: Colors.purple,
+                                // ここで true を渡す
+                                onTap: () => _openUrl(post.canvaUrl!, forceInApp: true),
+                              ),
+                              const SizedBox(height: 24),
+                            ],
+
+                            // 編集ボタン（著者のみ表示）
+                            if (_canEditPost(post))
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _goToEdit(post),
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.edit),
+                                  label: const Text('編集する'),
+                                ),
+                              ),
+                            const SizedBox(height: 32),
+                            
+                            // コメントセクションヘッダー
+                            const Text(
+                              'コメント',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
                         ),
-                      const SizedBox(height: 32),
-                    ],
-                  ),
+                      ),
+                    ),
+                    
+                    // コメントリスト
+                    _buildCommentList(),
+                    
+                    // 下部の余白（入力欄が被らないように少し多めに）
+                    const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                  ],
                 ),
               ),
+              
+              // コメント入力欄
+              _buildCommentInputArea(),
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildCommentList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _commentsStream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: SelectableText('エラー: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
+            ),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SliverToBoxAdapter(
+             child: Center(child: Padding(
+               padding: EdgeInsets.all(20.0),
+               child: CircularProgressIndicator(),
+             )),
+          );
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
+
+        return SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              final userIconUrl = data['userIconUrl'] as String?;
+              final userName = data['userName'] as String? ?? 'Unknown';
+              final text = data['text'] as String? ?? '';
+              final createdAt = data['createdAt'] as Timestamp?;
+              final dateStr = createdAt != null
+                  ? DateFormat('yyyy/MM/dd HH:mm').format(createdAt.toDate())
+                  : '';
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.grey[200],
+                      backgroundImage: (userIconUrl != null && userIconUrl.isNotEmpty)
+                          ? NetworkImage(userIconUrl)
+                          : null,
+                      child: (userIconUrl == null || userIconUrl.isEmpty)
+                          ? const Icon(Icons.person, size: 20, color: Colors.grey)
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                userName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                dateStr,
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          _ExpandableCommentText(text),
+                          const Divider(height: 24),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+            childCount: docs.length,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCommentInputArea() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            offset: const Offset(0, -2),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 12,
+        bottom: 12 + MediaQuery.of(context).padding.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end, // 入力欄が伸びた時にボタンを下揃えにするかどうか
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _commentController,
+                  maxLines: 5,
+                  minLines: 1,
+                  maxLength: 500, // カウンターはTextFieldの機能で表示
+                  decoration: InputDecoration(
+                    hintText: 'コメントを入力...',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.all(12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: const BorderSide(color: Colors.teal),
+                    ),
+                    counterText: '', // デフォルトのカウンターを非表示にして自前で出すか、これを使うか。
+                                     // 要件「入力欄の近くに 現在文字数 / 500 のカウンターを表示」
+                                     // maxLengthを使うと右下に自動で出る。これで十分か、カスタムするか。
+                                     // Flutter標準のcounterTextで十分要件を満たす。
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                height: 48, // minLines:1 のときの高さに合わせる調整
+                child: Center(
+                  child: _isSubmittingComment
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.send),
+                          color: _commentController.text.trim().isEmpty 
+                              ? Colors.grey 
+                              : Colors.teal,
+                          onPressed: _commentController.text.trim().isEmpty 
+                              ? null 
+                              : _submitComment,
+                        ),
+                ),
+              ),
+            ],
+          ),
+          // 文字数カウンターを明示的に右下に出したい場合（標準機能で出るので一旦標準に任せるが、位置調整が必要ならRowの下に置く）
+          Align(
+             alignment: Alignment.centerRight,
+             child: Padding(
+               padding: const EdgeInsets.only(top: 4, right: 50), // 送信ボタンの左辺り
+               child: Text(
+                 '${_commentController.text.length} / 500',
+                 style: TextStyle(
+                   fontSize: 11,
+                   color: _commentController.text.length > 500 ? Colors.red : Colors.grey,
+                 ),
+               ),
+             ),
+          ),
+        ],
       ),
     );
   }
@@ -726,6 +1048,73 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ExpandableCommentText extends StatefulWidget {
+  final String text;
+  const _ExpandableCommentText(this.text);
+
+  @override
+  State<_ExpandableCommentText> createState() => _ExpandableCommentTextState();
+}
+
+class _ExpandableCommentTextState extends State<_ExpandableCommentText> {
+  bool _isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // テキストの長さを判定するためのペインター
+        final span = TextSpan(
+          text: widget.text,
+          style: const TextStyle(fontSize: 14),
+        );
+        final tp = TextPainter(
+          text: span,
+          textDirection: ui.TextDirection.ltr,
+          maxLines: 3,
+        );
+        tp.layout(maxWidth: constraints.maxWidth);
+
+        if (!tp.didExceedMaxLines) {
+           // 3行に収まるならそのまま表示
+           return Text(widget.text, style: const TextStyle(fontSize: 14));
+        }
+
+        // 3行を超える場合
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.text,
+              style: const TextStyle(fontSize: 14),
+              maxLines: _isExpanded ? null : 3,
+              overflow: _isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+            ),
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _isExpanded = !_isExpanded;
+                });
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  _isExpanded ? '閉じる' : '...もっと見る',
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
