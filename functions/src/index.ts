@@ -107,6 +107,7 @@ interface UpsertPostInput {
   canvaUrl?: string | null;
   categories?: string[];
   status?: string | null;
+  fileUrls?: string[]; // 画像/ファイルのURL配列
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +200,7 @@ function parseNotionPageToPost(page: PageObjectResponse): PostData {
 
     secondCheckAssignees: getPeopleNames("Check ② 担当"),
     authors: getPeopleNames("著者"),
-    fileUrls: getFileUrls("ファイル&メディア"),
+    fileUrls: getFileUrls("fileUrls"),
 
     status: getStatusName("ステータス"),
     createdTime: page.created_time || null,
@@ -247,6 +248,23 @@ function buildNotionProperties(post: UpsertPostInput) {
   if (post.status !== undefined) {
     props["ステータス"] = {
       status: post.status ? { name: post.status } : null,
+    };
+  }
+
+  // fileUrls（files型）- 外部URLとして保存
+  if (post.fileUrls !== undefined && post.fileUrls.length > 0) {
+    props["fileUrls"] = {
+      files: post.fileUrls.map((url: string) => {
+        // URLからファイル名を抽出
+        const fileName = url.split("/").pop()?.split("?")[0] || "file";
+        return {
+          type: "external",
+          name: decodeURIComponent(fileName),
+          external: {
+            url: url,
+          },
+        };
+      }),
     };
   }
 
