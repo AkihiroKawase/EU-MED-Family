@@ -35,6 +35,9 @@ class Post {
   /// 著者（people）
   final List<String> authors;
 
+  /// 著者のNotionユーザーID（people）
+  final List<String> authorIds;
+
   /// Notion の created_time / last_edited_time
   final DateTime? createdTime;
   final DateTime? lastEditedTime;
@@ -50,6 +53,7 @@ class Post {
     this.status,
     this.fileUrls = const [],
     this.authors = const [],
+    this.authorIds = const [],
     this.createdTime,
     this.lastEditedTime,
   });
@@ -80,6 +84,7 @@ class Post {
       status: json['status']?.toString(),
       fileUrls: _toStringList(json['fileUrls']),
       authors: _toStringList(json['authors']),
+      authorIds: _toStringList(json['authorIds']),
       createdTime: json['createdTime'] != null
           ? DateTime.tryParse(json['createdTime'].toString())
           : null,
@@ -102,6 +107,7 @@ class Post {
       'status': status,
       'fileUrls': fileUrls,
       'authors': authors,
+      'authorIds': authorIds,
       'createdTime': createdTime?.toIso8601String(),
       'lastEditedTime': lastEditedTime?.toIso8601String(),
     };
@@ -187,6 +193,16 @@ class Post {
           .toList();
     }
 
+    List<String> _getPeopleIds(String key) {
+      final prop = props[key];
+      if (prop == null) return <String>[];
+      final List<dynamic> people = (prop['people'] as List?) ?? [];
+      return people
+          .map((p) => (p as Map)['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+    }
+
     DateTime? _parseDateTimeTopLevel(String key) {
       final v = page[key]?.toString();
       if (v == null) return null;
@@ -210,6 +226,7 @@ class Post {
       status: _getStatusName('ステータス'),
       fileUrls: _getFileUrls('ファイル＆メディア'),
       authors: _getPeopleNames('著者'),
+      authorIds: _getPeopleIds('著者'),
       createdTime: _parseDateTimeTopLevel('created_time'),
       lastEditedTime: _parseDateTimeTopLevel('last_edited_time'),
     );

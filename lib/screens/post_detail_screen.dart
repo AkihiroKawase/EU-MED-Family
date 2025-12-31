@@ -1,5 +1,7 @@
 // lib/screens/post_detail_screen.dart
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
@@ -42,11 +44,65 @@ Future<void> openPdfFromNotion(String pageId) async {
 class _PostDetailScreenState extends State<PostDetailScreen> {
   final _notionService = NotionPostService();
   late Future<Post> _futurePost;
+  
+  // ログインユーザーのNotionユーザーID
+  String? _currentUserNotionId;
+  bool _isLoadingNotionId = true;
 
   @override
   void initState() {
     super.initState();
     _futurePost = _notionService.fetchPost(widget.postId);
+    _loadCurrentUserNotionId();
+  }
+
+  /// ログインユーザーのNotionユーザーIDをFirestoreから取得
+  Future<void> _loadCurrentUserNotionId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          _isLoadingNotionId = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      if (!mounted) return;
+
+      final notionUserId = doc.data()?['notionUserId'] as String?;
+      setState(() {
+        _currentUserNotionId = notionUserId;
+        _isLoadingNotionId = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading notionUserId: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingNotionId = false;
+        });
+      }
+    }
+  }
+
+  /// 現在のユーザーが投稿の著者かどうかを判定
+  bool _canEditPost(Post post) {
+    // NotionユーザーIDの読み込み中は編集不可
+    if (_isLoadingNotionId) return false;
+    
+    // NotionユーザーIDがない場合は編集不可
+    if (_currentUserNotionId == null || _currentUserNotionId!.isEmpty) {
+      return false;
+    }
+    
+    // 投稿の著者IDリストにログインユーザーのNotionユーザーIDが含まれているか確認
+    return post.authorIds.contains(_currentUserNotionId);
   }
 
   Future<void> _openUrl(String url) async {
@@ -210,23 +266,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       )
                     : null,
                 actions: [
-                  IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: hasHeaderImage
-                            ? Colors.black.withOpacity(0.3)
-                            : Colors.grey[100],
-                        shape: BoxShape.circle,
+                  if (_canEditPost(post))
+                    IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: hasHeaderImage
+                              ? Colors.black.withOpacity(0.3)
+                              : Colors.grey[100],
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.edit,
+                          size: 20,
+                          color: hasHeaderImage ? Colors.white : Colors.grey[700],
+                        ),
                       ),
-                      child: Icon(
-                        Icons.edit,
-                        size: 20,
-                        color: hasHeaderImage ? Colors.white : Colors.grey[700],
-                      ),
+                      onPressed: () => _goToEdit(post),
                     ),
-                    onPressed: () => _goToEdit(post),
-                  ),
                 ],
               ),
 
@@ -411,21 +468,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         const SizedBox(height: 24),
                       ],
 
-                      // 編集ボタン
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () => _goToEdit(post),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                      // 編集ボタン（著者のみ表示）
+                      if (_canEditPost(post))
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () => _goToEdit(post),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
+                            icon: const Icon(Icons.edit),
+                            label: const Text('編集する'),
                           ),
-                          icon: const Icon(Icons.edit),
-                          label: const Text('編集する'),
                         ),
-                      ),
                       const SizedBox(height: 32),
                     ],
                   ),

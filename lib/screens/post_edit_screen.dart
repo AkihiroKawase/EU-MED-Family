@@ -225,6 +225,7 @@ class _PostEditScreenState extends State<PostEditScreen> {
         status: statusText.isEmpty ? null : statusText,
         fileUrls: widget.post?.fileUrls ?? <String>[],
         authors: widget.post?.authors ?? <String>[],
+        authorIds: widget.post?.authorIds ?? <String>[],
         createdTime: widget.post?.createdTime,
         lastEditedTime: widget.post?.lastEditedTime,
       );
