@@ -49,11 +49,87 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   String? _currentUserNotionId;
   bool _isLoadingNotionId = true;
 
+  // Like機能用の状態変数
+  bool _isLiked = false;
+  Stream<QuerySnapshot>? _likesStream;
+
   @override
   void initState() {
     super.initState();
     _futurePost = _notionService.fetchPost(widget.postId);
     _loadCurrentUserNotionId();
+    _initLikeStatus();
+  }
+
+  /// いいね機能の初期化
+  void _initLikeStatus() {
+    final user = FirebaseAuth.instance.currentUser;
+    
+    // いいね数の監視
+    _likesStream = FirebaseFirestore.instance
+        .collection('post_likes')
+        .where('postId', isEqualTo: widget.postId)
+        .snapshots();
+
+    // 自分のいいね状態確認
+    if (user != null) {
+      FirebaseFirestore.instance
+          .collection('post_likes')
+          .doc('${widget.postId}_${user.uid}')
+          .get()
+          .then((doc) {
+        if (mounted) {
+          setState(() {
+            _isLiked = doc.exists;
+          });
+        }
+      });
+    }
+  }
+
+  /// いいね切り替え処理
+  Future<void> _toggleLike() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ログインが必要です')),
+      );
+      return;
+    }
+
+    // 体感速度向上のため、先にローカルのUIを更新
+    setState(() {
+      _isLiked = !_isLiked;
+    });
+
+    final docRef = FirebaseFirestore.instance
+        .collection('post_likes')
+        .doc('${widget.postId}_${user.uid}');
+
+    try {
+      if (_isLiked) {
+        // いいね追加
+        await docRef.set({
+          'postId': widget.postId,
+          'userId': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        // いいね削除
+        await docRef.delete();
+      }
+    } catch (e) {
+      debugPrint('Error toggling like: $e');
+      // エラー時は元の状態に戻す
+      if (mounted) {
+        setState(() {
+          _isLiked = !_isLiked;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('いいねの更新に失敗しました')),
+        );
+      }
+    }
   }
 
   /// ログインユーザーのNotionユーザーIDをFirestoreから取得
@@ -375,6 +451,56 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ],
                           ],
                         ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // いいねボタン
+                      StreamBuilder<QuerySnapshot>(
+                        stream: _likesStream,
+                        builder: (context, snapshot) {
+                          final likeCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                          final color = _isLiked ? Colors.red : Colors.grey;
+                          final bgColor = _isLiked ? Colors.red.withOpacity(0.1) : Colors.grey[100];
+
+                          return GestureDetector(
+                            onTap: _toggleLike,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: bgColor,
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _isLiked ? Icons.favorite : Icons.favorite_border,
+                                    color: color,
+                                    size: 24,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '$likeCount',
+                                    style: TextStyle(
+                                      color: color,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'いいね！',
+                                    style: TextStyle(
+                                      color: color,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 24),
 
