@@ -324,23 +324,6 @@ class _PostListScreenState extends State<PostListScreen> {
                             ),
                           ),
                         ],
-                        if (post.status != null && post.status!.isNotEmpty) ...[
-                          if (authorText.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 6),
-                              child: Text(
-                                '•',
-                                style: TextStyle(color: Colors.grey[400]),
-                              ),
-                            ),
-                          Text(
-                            post.status!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ],

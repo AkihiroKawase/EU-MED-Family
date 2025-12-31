@@ -37,10 +37,6 @@ class _PostEditScreenState extends State<PostEditScreen> {
   ];
   String? _selectedCategory;
 
-  // 1st check / Check②
-  late bool _firstCheck;
-  late bool _secondCheck;
-
   // Notion連携状態
   bool _isNotionLinked = false;
   bool _isCheckingNotionLink = true;
@@ -63,7 +59,7 @@ class _PostEditScreenState extends State<PostEditScreen> {
     _canvaUrlController =
         TextEditingController(text: widget.post?.canvaUrl ?? '');
     _statusController =
-        TextEditingController(text: widget.post?.status ?? '');
+        TextEditingController(text: widget.post?.status ?? 'チェック待ち');
     
     // 既存のCategoryが選択肢にあればそれを選択、なければnull
     final existingCategory = widget.post?.categories.isNotEmpty == true 
@@ -72,9 +68,6 @@ class _PostEditScreenState extends State<PostEditScreen> {
     if (existingCategory != null && _categoryOptions.contains(existingCategory)) {
       _selectedCategory = existingCategory;
     }
-
-    _firstCheck = widget.post?.firstCheck ?? false;
-    _secondCheck = widget.post?.secondCheck ?? false;
 
     // 既存の画像URLを取得（1枚目のみ）
     if (widget.post?.fileUrls.isNotEmpty == true) {
@@ -217,10 +210,10 @@ class _PostEditScreenState extends State<PostEditScreen> {
       final post = Post(
         id: widget.post?.id ?? '',
         title: title,
-        firstCheck: _firstCheck,
+        firstCheck: widget.post?.firstCheck ?? false,
         canvaUrl: canvaUrlText.isEmpty ? null : canvaUrlText,
         categories: categories,
-        secondCheck: _secondCheck,
+        secondCheck: widget.post?.secondCheck ?? false,
         secondCheckAssignees: widget.post?.secondCheckAssignees ?? <String>[],
         status: statusText.isEmpty ? null : statusText,
         fileUrls: widget.post?.fileUrls ?? <String>[],
@@ -543,34 +536,19 @@ class _PostEditScreenState extends State<PostEditScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // ステータス（テキスト入力）
+                  // ステータス（固定・編集不可）
                   TextFormField(
                     controller: _statusController,
-                    decoration: const InputDecoration(
+                    readOnly: true, // ★ 編集不可にする
+                    style: TextStyle(color: Colors.grey[700]), // 文字色を少し薄く
+                    decoration: InputDecoration( // const を削除（fillColorを使うため）
                       labelText: 'ステータス',
-                      hintText: '例: 未着手 / チェック中 / 完了',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                      filled: true, // 背景色をつける
+                      fillColor: Colors.grey[200], // グレー背景にして固定項目であることを強調
                     ),
                   ),
                   const SizedBox(height: 16),
-
-                  // 1st check
-                  SwitchListTile(
-                    title: const Text('1st check'),
-                    value: _firstCheck,
-                    onChanged: (v) {
-                      setState(() => _firstCheck = v);
-                    },
-                  ),
-
-                  // Check ②
-                  SwitchListTile(
-                    title: const Text('Check ②'),
-                    value: _secondCheck,
-                    onChanged: (v) {
-                      setState(() => _secondCheck = v);
-                    },
-                  ),
 
                   const SizedBox(height: 24),
 

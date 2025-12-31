@@ -105,10 +105,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return post.authorIds.contains(_currentUserNotionId);
   }
 
-  Future<void> _openUrl(String url) async {
+  Future<void> _openUrl(String url, {bool forceInApp = false}) async {
     try {
       final uri = Uri.parse(url);
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      // フラグがtrueならアプリ内(InAppWebView)、falseなら外部アプリ(External)
+      final mode = forceInApp ? LaunchMode.inAppWebView : LaunchMode.externalApplication;
+
+      final ok = await launchUrl(
+        uri,
+        mode: mode,
+        // Canva等はJSが必要なので有効化しておく
+        webViewConfiguration: const WebViewConfiguration(enableJavaScript: true),
+      );
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('リンクを開けませんでした')),
@@ -315,27 +323,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                             ),
                           ),
-                          if (post.status != null && post.status!.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[100],
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                post.status!,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.grey[700],
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -391,25 +378,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       ),
                       const SizedBox(height: 24),
 
-                      // チェック状況
-                      if (post.firstCheck || post.secondCheck) ...[
-                        _buildSectionTitle('チェック状況'),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            _buildCheckBadge(
-                              label: '1st Check',
-                              isChecked: post.firstCheck,
-                            ),
-                            const SizedBox(width: 12),
-                            _buildCheckBadge(
-                              label: 'Check ②',
-                              isChecked: post.secondCheck,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                      ],
 
                       // ファイル&メディア（ヘッダー以外のファイル）
                       if (post.fileUrls.length > 1) ...[
@@ -432,38 +400,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       if (post.canvaUrl != null && post.canvaUrl!.isNotEmpty) ...[
                         _buildSectionTitle('Canva デザイン'),
                         const SizedBox(height: 12),
+                        // Canva リンク
                         _buildLinkCard(
                           title: 'Canvaで開く',
-                          subtitle: 'タップして外部ブラウザで表示',
+                          subtitle: 'タップして表示', // 文言も「外部ブラウザ」から変更すると親切です
                           icon: Icons.design_services,
                           iconColor: Colors.purple,
-                          onTap: () => _openUrl(post.canvaUrl!),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-
-                      // Check② 担当者
-                      if (post.secondCheckAssignees.isNotEmpty) ...[
-                        _buildSectionTitle('Check② 担当'),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: post.secondCheckAssignees
-                              .map((name) => Chip(
-                                    avatar: CircleAvatar(
-                                      backgroundColor: Colors.teal[100],
-                                      child: Text(
-                                        name.isNotEmpty ? name[0] : '?',
-                                        style: TextStyle(
-                                          color: Colors.teal[700],
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                    label: Text(name),
-                                  ))
-                              .toList(),
+                          // ここで true を渡す
+                          onTap: () => _openUrl(post.canvaUrl!, forceInApp: true),
                         ),
                         const SizedBox(height: 24),
                       ],
@@ -536,41 +480,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildCheckBadge({
-    required String label,
-    required bool isChecked,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: isChecked ? Colors.green[50] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isChecked ? Colors.green[200]! : Colors.grey[300]!,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isChecked ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 18,
-            color: isChecked ? Colors.green : Colors.grey[400],
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              color: isChecked ? Colors.green[700] : Colors.grey[600],
-              fontWeight: isChecked ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
