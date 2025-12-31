@@ -558,7 +558,7 @@ export const getPostsByUserId = onCall(async (request) => {
 });
 
 /**
- * getPosts: Notion DBから投稿一覧を取得
+ * getPosts: Notion DBから投稿一覧を取得（ステータス「完了」のみ）
  */
 export const getPosts = onCall(async (request) => {
   if (!request.auth) {
@@ -572,6 +572,12 @@ export const getPosts = onCall(async (request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response = await (client as any).databases.query({
       database_id: databaseId,
+      filter: {
+        property: "ステータス",
+        status: {
+          equals: "完了",
+        },
+      },
       sorts: [
         {
           timestamp: "created_time",
@@ -625,6 +631,7 @@ export const getPost = onCall(async (request) => {
 
 /**
  * upsertPost: Notion にページを作成または更新
+ * 新規作成時はログインユーザーのNotionユーザーIDを著者に自動設定
  */
 export const upsertPost = onCall(async (request) => {
   if (!request.auth) {
@@ -633,6 +640,7 @@ export const upsertPost = onCall(async (request) => {
 
   const client = getNotionClient();
   const databaseId = getNotionDatabaseId();
+  const uid = request.auth.uid;
 
   const data = request.data as UpsertPostInput | undefined;
   if (!data || typeof data.title !== "string") {
@@ -643,6 +651,7 @@ export const upsertPost = onCall(async (request) => {
 
   try {
     if (data.id && data.id.length > 0) {
+      // 更新時は著者を変更しない
       await client.pages.update({
         page_id: data.id,
         properties,
@@ -650,6 +659,22 @@ export const upsertPost = onCall(async (request) => {
 
       return { success: true, message: "Post updated successfully." };
     } else {
+      // 新規作成時：ログインユーザーのNotionユーザーIDを著者に設定
+      // FirestoreからnotionUserIdを取得
+      const userDoc = await db.collection("users").doc(uid).get();
+      const notionUserId = userDoc.data()?.notionUserId as string | undefined;
+
+      if (notionUserId) {
+        // 著者プロパティ（People型）を追加
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (properties as any)["著者"] = {
+          people: [{ id: notionUserId }],
+        };
+        console.log(`Setting author to Notion User ID: ${notionUserId}`);
+      } else {
+        console.log(`No notionUserId found for user ${uid}, skipping author assignment`);
+      }
+
       const createParams: CreatePageParameters = {
         parent: { database_id: databaseId },
         properties,
