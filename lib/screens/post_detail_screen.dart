@@ -27,10 +27,15 @@ Future<void> openPdfFromNotion(String pageId) async {
     throw Exception('PDFが見つかりません');
   }
 
-  await launchUrl(
-    Uri.parse(url),
-    mode: LaunchMode.externalApplication,
-  );
+  try {
+    await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    );
+  } catch (e) {
+    debugPrint('Error launching PDF URL: $e');
+    throw Exception('URLを開けませんでした');
+  }
 }
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
@@ -44,20 +49,60 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('リンクを開けませんでした')),
-      );
+    try {
+      final uri = Uri.parse(url);
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('リンクを開けませんでした')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error opening URL: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('URLの形式が不正です')),
+        );
+      }
     }
   }
 
   String _fileNameFromUrl(String url) {
-    final uri = Uri.parse(url);
-    final last = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'file';
-    final decoded = Uri.decodeComponent(last);
-    return decoded.trim().isEmpty ? 'ファイル' : decoded;
+    try {
+      // URLに不正なパーセントエンコーディングが含まれる場合があるため、
+      // try-catchで安全に処理する
+      final uri = Uri.tryParse(url);
+      if (uri == null || uri.pathSegments.isEmpty) {
+        // URLのパースに失敗した場合、最後の/以降を取得
+        final lastSlash = url.lastIndexOf('/');
+        if (lastSlash != -1 && lastSlash < url.length - 1) {
+          var fileName = url.substring(lastSlash + 1);
+          // クエリパラメータを除去
+          final queryIndex = fileName.indexOf('?');
+          if (queryIndex != -1) {
+            fileName = fileName.substring(0, queryIndex);
+          }
+          // デコードを試みる（失敗してもそのまま返す）
+          try {
+            return Uri.decodeComponent(fileName);
+          } catch (_) {
+            return fileName.isNotEmpty ? fileName : 'ファイル';
+          }
+        }
+        return 'ファイル';
+      }
+      
+      final last = uri.pathSegments.last;
+      try {
+        final decoded = Uri.decodeComponent(last);
+        return decoded.trim().isEmpty ? 'ファイル' : decoded;
+      } catch (_) {
+        return last.isNotEmpty ? last : 'ファイル';
+      }
+    } catch (e) {
+      debugPrint('Error parsing URL: $e');
+      return 'ファイル';
+    }
   }
 
   void _goToEdit(Post post) async {

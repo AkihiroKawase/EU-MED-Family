@@ -11,7 +11,7 @@ import 'screens/login_screen.dart';
 import 'screens/post_list_screen.dart'; 
 
 // Emulatorを使用するかどうかのフラグ（デバッグモードで自動的にtrue）
-const bool useEmulator = kDebugMode;
+const bool useEmulator = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
