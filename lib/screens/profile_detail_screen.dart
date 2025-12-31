@@ -32,6 +32,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   bool _isLoadingLikedPosts = false;
   String? _likedPostsError;
 
+  // 表示件数制御用のフラグ
+  bool _isUserPostsExpanded = false;
+  bool _isLikedPostsExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -402,6 +406,11 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   }
 
   Widget _buildUserPostsSection({required bool isOwnProfile}) {
+    // 表示するリストを制御
+    final int totalCount = _userPosts.length;
+    final bool showAll = _isUserPostsExpanded || totalCount <= 3;
+    final int displayCount = showAll ? totalCount : 3;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16.0),
@@ -456,11 +465,11 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 style: TextStyle(color: Colors.grey[600]),
               ),
             )
-          else
+          else ...[
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: _userPosts.length,
+              itemCount: displayCount,
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final post = _userPosts[index];
@@ -498,12 +507,35 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 );
               },
             ),
+            // もっと見るボタン
+            if (totalCount > 3)
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isUserPostsExpanded = !_isUserPostsExpanded;
+                    });
+                  },
+                  icon: Icon(
+                    _isUserPostsExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    size: 20,
+                  ),
+                  label: Text(_isUserPostsExpanded ? '閉じる' : 'もっと見る'),
+                ),
+              ),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildLikedPostsSection() {
+    // 表示するリストを制御
+    final int totalCount = _likedPosts.length;
+    final bool showAll = _isLikedPostsExpanded || totalCount <= 3;
+    final int displayCount = showAll ? totalCount : 3;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16.0),
@@ -558,11 +590,11 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 style: TextStyle(color: Colors.grey[600]),
               ),
             )
-          else
+          else ...[
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: _likedPosts.length,
+              itemCount: displayCount,
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final post = _likedPosts[index];
@@ -587,6 +619,24 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 );
               },
             ),
+            // もっと見るボタン
+            if (totalCount > 3)
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isLikedPostsExpanded = !_isLikedPostsExpanded;
+                    });
+                  },
+                  icon: Icon(
+                    _isLikedPostsExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    size: 20,
+                  ),
+                  label: Text(_isLikedPostsExpanded ? '閉じる' : 'もっと見る'),
+                ),
+              ),
+          ],
         ],
       ),
     );

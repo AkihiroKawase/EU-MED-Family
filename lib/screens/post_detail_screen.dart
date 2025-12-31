@@ -58,7 +58,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final _commentController = TextEditingController();
   bool _isSubmittingComment = false;
   Map<String, dynamic>? _currentUserData;
+
   Stream<QuerySnapshot>? _commentsStream;
+  bool _isCommentsExpanded = false; // コメント一覧の開閉状態
 
   @override
   void initState() {
@@ -710,7 +712,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         if (snapshot.hasError) {
           return SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               child: SelectableText('エラー: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
             ),
           );
@@ -729,9 +731,40 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
 
+        // 表示件数の制御
+        final int totalCount = docs.length;
+        final bool showAll = _isCommentsExpanded || totalCount <= 3;
+        final int displayCount = showAll ? totalCount : 3;
+
         return SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) {
+              // 「もっと見る/閉じる」ボタンの表示
+              if (index == displayCount) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _isCommentsExpanded = !_isCommentsExpanded;
+                        });
+                      },
+                      icon: Icon(
+                        _isCommentsExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                        size: 20,
+                      ),
+                      label: Text(
+                        _isCommentsExpanded 
+                            ? '閉じる' 
+                            : 'コメントをすべて表示（全$totalCount件）'
+                      ),
+                    ),
+                  ),
+                );
+              }
+
               final data = docs[index].data() as Map<String, dynamic>;
               final userIconUrl = data['userIconUrl'] as String?;
               final userName = data['userName'] as String? ?? 'Unknown';
@@ -781,7 +814,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ],
                           ),
                           const SizedBox(height: 4),
-                          _ExpandableCommentText(text),
+                          // テキストの省略表示（read moreなし、ellipsisのみ）
+                          Text(
+                            text,
+                            style: const TextStyle(fontSize: 14, height: 1.4),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           const Divider(height: 24),
                         ],
                       ),
@@ -790,7 +829,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 ),
               );
             },
-            childCount: docs.length,
+            // ボタンを表示する場合は +1
+            childCount: displayCount + (totalCount > 3 ? 1 : 0),
           ),
         );
       },
@@ -1052,69 +1092,3 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 }
 
-class _ExpandableCommentText extends StatefulWidget {
-  final String text;
-  const _ExpandableCommentText(this.text);
-
-  @override
-  State<_ExpandableCommentText> createState() => _ExpandableCommentTextState();
-}
-
-class _ExpandableCommentTextState extends State<_ExpandableCommentText> {
-  bool _isExpanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // テキストの長さを判定するためのペインター
-        final span = TextSpan(
-          text: widget.text,
-          style: const TextStyle(fontSize: 14),
-        );
-        final tp = TextPainter(
-          text: span,
-          textDirection: ui.TextDirection.ltr,
-          maxLines: 3,
-        );
-        tp.layout(maxWidth: constraints.maxWidth);
-
-        if (!tp.didExceedMaxLines) {
-           // 3行に収まるならそのまま表示
-           return Text(widget.text, style: const TextStyle(fontSize: 14));
-        }
-
-        // 3行を超える場合
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.text,
-              style: const TextStyle(fontSize: 14),
-              maxLines: _isExpanded ? null : 3,
-              overflow: _isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
-            ),
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  _isExpanded = !_isExpanded;
-                });
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(top: 4.0),
-                child: Text(
-                  _isExpanded ? '閉じる' : '...もっと見る',
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
