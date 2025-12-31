@@ -40,6 +40,9 @@ class _PostEditScreenState extends State<PostEditScreen> {
   bool _isNotionLinked = false;
   bool _isCheckingNotionLink = true;
 
+  // 保存中フラグ（連打防止）
+  bool _isSaving = false;
+
   bool get _isEdit => widget.post != null;
 
   @override
@@ -111,7 +114,15 @@ class _PostEditScreenState extends State<PostEditScreen> {
   }
 
   Future<void> _save() async {
+    // 保存中の場合は何もしない（連打防止）
+    if (_isSaving) return;
+    
     if (!_formKey.currentState!.validate()) return;
+
+    // 保存開始
+    setState(() {
+      _isSaving = true;
+    });
 
     // Categoryはプルダウンで選択した値を配列に
     final categories = _selectedCategory != null ? [_selectedCategory!] : <String>[];
@@ -149,6 +160,10 @@ class _PostEditScreenState extends State<PostEditScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('保存に失敗しました: $e')),
       );
+      // エラー時のみ保存フラグをリセット（成功時は画面遷移するのでリセット不要）
+      setState(() {
+        _isSaving = false;
+      });
     }
   }
 
@@ -165,20 +180,32 @@ class _PostEditScreenState extends State<PostEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 投稿可能かどうか（連携チェック中または連携済みでないと投稿不可）
-    final canPost = !_isCheckingNotionLink && _isNotionLinked;
+    // 投稿可能かどうか（連携チェック中または連携済みでないと投稿不可、保存中も不可）
+    final canPost = !_isCheckingNotionLink && _isNotionLinked && !_isSaving;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? '投稿編集' : '新規投稿'),
         actions: [
-          IconButton(
-            onPressed: canPost ? _save : _showNotionLinkRequiredMessage,
-            icon: Icon(
-              Icons.check,
-              color: canPost ? null : Colors.grey,
-            ),
-          ),
+          _isSaving
+              ? const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  ),
+                )
+              : IconButton(
+                  onPressed: canPost ? _save : (_isNotionLinked ? null : _showNotionLinkRequiredMessage),
+                  icon: Icon(
+                    Icons.check,
+                    color: canPost ? null : Colors.grey,
+                  ),
+                ),
         ],
       ),
       body: Padding(
@@ -318,13 +345,23 @@ class _PostEditScreenState extends State<PostEditScreen> {
               const SizedBox(height: 24),
 
               ElevatedButton.icon(
-                onPressed: canPost ? _save : _showNotionLinkRequiredMessage,
+                onPressed: canPost ? _save : (_isNotionLinked ? null : _showNotionLinkRequiredMessage),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: canPost ? null : Colors.grey.shade300,
                   foregroundColor: canPost ? null : Colors.grey.shade600,
                 ),
-                icon: const Icon(Icons.check),
-                label: Text(_isEdit ? '更新する' : '投稿する'),
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_isSaving 
+                    ? '保存中...' 
+                    : (_isEdit ? '更新する' : '投稿する')),
               ),
             ],
           ),
