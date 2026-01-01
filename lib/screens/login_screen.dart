@@ -48,11 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
       String errorMessage = 'ログインに失敗しました';
       
       switch (e.code) {
+        case 'invalid-credential':
         case 'user-not-found':
-          errorMessage = 'ユーザーが見つかりません';
-          break;
         case 'wrong-password':
-          errorMessage = 'パスワードが間違っています';
+          errorMessage = 'メールアドレスまたはパスワードが間違っています';
           break;
         case 'invalid-email':
           errorMessage = 'メールアドレスの形式が正しくありません';
@@ -60,8 +59,11 @@ class _LoginScreenState extends State<LoginScreen> {
         case 'user-disabled':
           errorMessage = 'このアカウントは無効化されています';
           break;
+        case 'too-many-requests':
+          errorMessage = 'しばらく時間を置いてから再度お試しください';
+          break;
         default:
-          errorMessage = 'エラー: ${e.message}';
+          errorMessage = 'ログインエラー: ${e.message}';
       }
       
       if (mounted) {
