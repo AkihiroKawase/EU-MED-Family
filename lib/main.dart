@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import 'firebase_options.dart';
 import 'screens/profile_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/post_list_screen.dart'; 
+
+// Emulatorを使用するかどうかのフラグ（デバッグモードで自動的にtrue）
+const bool useEmulator = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,7 +19,27 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
   
+  // Emulatorに接続（デバッグモードのみ）
+  if (useEmulator) {
+    await _connectToEmulators();
+  }
+  
   runApp(const MyApp());
+}
+
+Future<void> _connectToEmulators() async {
+  const String host = 'localhost';
+  
+  // Auth Emulator
+  await FirebaseAuth.instance.useAuthEmulator(host, 9099);
+  
+  // Firestore Emulator
+  FirebaseFirestore.instance.useFirestoreEmulator(host, 8080);
+  
+  // Functions Emulator
+  FirebaseFunctions.instance.useFunctionsEmulator(host, 5001);
+  
+  debugPrint('🔧 Firebase Emulators connected');
 }
 
 class MyApp extends StatelessWidget {

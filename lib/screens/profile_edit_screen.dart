@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../widgets/app_bottom_nav.dart';
-import 'post_list_screen.dart'; 
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'profile_list_screen.dart';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({Key? key}) : super(key: key);
@@ -16,6 +18,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _isLoading = false;
   bool _isNewUser = false;
   
+  // 画像関連
+  File? _selectedProfileImage;
+  File? _selectedCoverImage;
+  String? _existingProfileImageUrl;
+  String? _existingCoverImageUrl;
+  
   // コントローラー
   final _displayNameController = TextEditingController();
   final _mbtiController = TextEditingController();
@@ -26,6 +34,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _schoolController = TextEditingController();
   final _gradeController = TextEditingController();
   final _bioController = TextEditingController();
+
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -48,26 +58,22 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   Future<void> _loadUserProfile() async {
-    // ローディング開始
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // 現在のユーザーを取得
       final currentUser = FirebaseAuth.instance.currentUser;
       
       if (currentUser == null) {
         return;
       }
 
-      // Firestoreからユーザードキュメントを取得
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
 
-      // ドキュメントが存在しない場合は新規ユーザー
       if (!snapshot.exists) {
         setState(() {
           _isNewUser = true;
@@ -75,7 +81,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         return;
       }
 
-      // データを取得してコントローラーにセット
       final data = snapshot.data();
       if (data != null && mounted) {
         setState(() {
@@ -88,6 +93,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           _schoolController.text = data['school'] ?? '';
           _gradeController.text = data['grade'] ?? '';
           _bioController.text = data['bio'] ?? '';
+          _existingProfileImageUrl = data['profileImageUrl'];
+          _existingCoverImageUrl = data['coverImageUrl'];
         });
       }
     } catch (e) {
@@ -105,12 +112,48 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
+  Future<void> _pickImage({required bool isProfile}) async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        imageQuality: 50,
+      );
+      
+      if (pickedFile != null) {
+        setState(() {
+          if (isProfile) {
+            _selectedProfileImage = File(pickedFile.path);
+          } else {
+            _selectedCoverImage = File(pickedFile.path);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('画像の選択に失敗しました: $e')),
+        );
+      }
+    }
+  }
+
+  Future<String?> _uploadImage(File file, String path) async {
+    try {
+      final ref = FirebaseStorage.instance.ref().child(path);
+      final uploadTask = await ref.putFile(file);
+      return await uploadTask.ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('Image upload error: $e');
+      return null;
+    }
+  }
+
   Future<void> _onSave() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    // 現在のユーザーを取得
     final currentUser = FirebaseAuth.instance.currentUser;
     
     if (currentUser == null) {
@@ -120,15 +163,31 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       return;
     }
 
-    // ローディング開始
     setState(() {
       _isLoading = true;
     });
 
     try {
       final uid = currentUser.uid;
+      String? profileImageUrl = _existingProfileImageUrl;
+      String? coverImageUrl = _existingCoverImageUrl;
       
-      // 書き込むデータを定義
+      // プロフィール画像をアップロード
+      if (_selectedProfileImage != null) {
+        profileImageUrl = await _uploadImage(
+          _selectedProfileImage!,
+          'users/$uid/profile.jpg',
+        );
+      }
+      
+      // カバー画像をアップロード
+      if (_selectedCoverImage != null) {
+        coverImageUrl = await _uploadImage(
+          _selectedCoverImage!,
+          'users/$uid/cover.jpg',
+        );
+      }
+      
       final Map<String, dynamic> dataToSave = {
         'displayName': _displayNameController.text,
         'mbti': _mbtiController.text,
@@ -139,17 +198,15 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         'school': _schoolController.text,
         'grade': _gradeController.text,
         'bio': _bioController.text,
-        'check1': false,
-        'check2': false,
+        'profileImageUrl': profileImageUrl,
+        'coverImageUrl': coverImageUrl,
         'updatedAt': FieldValue.serverTimestamp(),
       };
       
-      // 新規ユーザーの場合のみ createdAt を設定
       if (_isNewUser) {
         dataToSave['createdAt'] = FieldValue.serverTimestamp();
       }
       
-      // Firestoreに保存（merge: true で既存フィールドを保持）
       await FirebaseFirestore.instance.collection('users').doc(uid).set(
         dataToSave,
         SetOptions(merge: true),
@@ -159,18 +216,20 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('保存しました')),
         );
-
-        // ★ 投稿一覧画面へ遷移（元の編集画面は置き換え）
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => const PostListScreen(),
-          ),
-        );
+        // 新規ユーザーの場合はプロフィール一覧画面へ遷移、既存ユーザーは前の画面に戻る
+        if (_isNewUser) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const ProfileListScreen()),
+            (route) => false,
+          );
+        } else {
+          Navigator.pop(context);
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('エラーが発生しました')),
+          SnackBar(content: Text('エラーが発生しました: $e')),
         );
       }
     } finally {
@@ -180,6 +239,119 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         });
       }
     }
+  }
+
+  Widget _buildImageHeader() {
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // カバー画像
+          GestureDetector(
+            onTap: () => _pickImage(isProfile: false),
+            child: Container(
+              height: 150,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+              ),
+              child: _selectedCoverImage != null
+                  ? Image.file(
+                      _selectedCoverImage!,
+                      fit: BoxFit.cover,
+                    )
+                  : _existingCoverImageUrl != null && _existingCoverImageUrl!.isNotEmpty
+                      ? Image.network(
+                          _existingCoverImageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _buildCoverPlaceholder(),
+                        )
+                      : _buildCoverPlaceholder(),
+            ),
+          ),
+          // プロフィールアイコン
+          Positioned(
+            left: 16,
+            bottom: 0,
+            child: GestureDetector(
+              onTap: () => _pickImage(isProfile: true),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: CircleAvatar(
+                  radius: 50,
+                  backgroundColor: Colors.grey[200],
+                  backgroundImage: _selectedProfileImage != null
+                      ? FileImage(_selectedProfileImage!)
+                      : _existingProfileImageUrl != null && _existingProfileImageUrl!.isNotEmpty
+                          ? NetworkImage(_existingProfileImageUrl!) as ImageProvider
+                          : null,
+                  child: (_selectedProfileImage == null &&
+                          (_existingProfileImageUrl == null || _existingProfileImageUrl!.isEmpty))
+                      ? const Icon(Icons.person, size: 50, color: Colors.grey)
+                      : null,
+                ),
+              ),
+            ),
+          ),
+          // カバー変更アイコン
+          Positioned(
+            right: 16,
+            bottom: 60,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+            ),
+          ),
+          // プロフィール変更アイコン
+          Positioned(
+            left: 80,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.teal,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoverPlaceholder() {
+    return Container(
+      color: Colors.grey[300],
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image, size: 40, color: Colors.grey[500]),
+            const SizedBox(height: 8),
+            Text(
+              'タップしてカバー画像を設定',
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -199,84 +371,101 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           SingleChildScrollView(
             child: Form(
               key: _formKey,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _displayNameController,
-                      decoration: const InputDecoration(
-                        labelText: '表示名',
-                      ),
-                      enabled: !_isLoading,
+              child: Column(
+                children: [
+                  _buildImageHeader(),
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _displayNameController,
+                          decoration: const InputDecoration(
+                            labelText: '表示名',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _currentCountryController,
+                          decoration: const InputDecoration(
+                            labelText: '現在の国',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _schoolController,
+                          decoration: const InputDecoration(
+                            labelText: '大学',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _gradeController,
+                          decoration: const InputDecoration(
+                            labelText: '学年',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _mbtiController,
+                          decoration: const InputDecoration(
+                            labelText: 'MBTI',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _futureCountryController,
+                          decoration: const InputDecoration(
+                            labelText: '卒後行きたい国',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _futureDreamController,
+                          decoration: const InputDecoration(
+                            labelText: '卒後の夢',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _canvaUrlController,
+                          decoration: const InputDecoration(
+                            labelText: 'Canva URL',
+                            border: OutlineInputBorder(),
+                          ),
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 16.0),
+                        TextFormField(
+                          controller: _bioController,
+                          decoration: const InputDecoration(
+                            labelText: '自己紹介',
+                            border: OutlineInputBorder(),
+                            alignLabelWithHint: true,
+                          ),
+                          maxLines: 5,
+                          enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 32.0),
+                      ],
                     ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _mbtiController,
-                      decoration: const InputDecoration(
-                        labelText: 'MBTI',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _canvaUrlController,
-                      decoration: const InputDecoration(
-                        labelText: 'Canva URL',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _futureCountryController,
-                      decoration: const InputDecoration(
-                        labelText: '卒後行きたい国',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _futureDreamController,
-                      decoration: const InputDecoration(
-                        labelText: '卒後の夢',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _currentCountryController,
-                      decoration: const InputDecoration(
-                        labelText: '現在の国',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _schoolController,
-                      decoration: const InputDecoration(
-                        labelText: '大学',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _gradeController,
-                      decoration: const InputDecoration(
-                        labelText: '学年',
-                      ),
-                      enabled: !_isLoading,
-                    ),
-                    const SizedBox(height: 16.0),
-                    TextFormField(
-                      controller: _bioController,
-                      decoration: const InputDecoration(
-                        labelText: '自己紹介',
-                      ),
-                      maxLines: 5,
-                      enabled: !_isLoading,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

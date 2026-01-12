@@ -1,1 +1,62 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"myfirstappforhungarymed","appId":"1:186756439743:android:2b8f31f0cae8bfbbb8300a","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"myfirstappforhungarymed","appId":"1:186756439743:ios:12d52b1044ef7df7b8300a","uploadDebugSymbols":false,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"myfirstappforhungarymed","configurations":{"android":"1:186756439743:android:2b8f31f0cae8bfbbb8300a","ios":"1:186756439743:ios:12d52b1044ef7df7b8300a"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "myfirstappforhungarymed",
+          "appId": "1:186756439743:android:2b8f31f0cae8bfbbb8300a",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "myfirstappforhungarymed",
+          "appId": "1:186756439743:ios:12d52b1044ef7df7b8300a",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "myfirstappforhungarymed",
+          "configurations": {
+            "android": "1:186756439743:android:2b8f31f0cae8bfbbb8300a",
+            "ios": "1:186756439743:ios:12d52b1044ef7df7b8300a"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "singleProjectMode": true
+  }
+}

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'register_screen.dart';
-import 'post_list_screen.dart'; // パスはあなたの構成に合わせて
+import 'profile_list_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -37,23 +37,21 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-      // ★ ここでログイン成功しているので画面遷移させる
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const PostListScreen(),
-        ),
-      );
-      // 成功時は何もしない（main.dartのStreamBuilderが検知する）
+      // ログイン成功時にProfileListScreenに遷移
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const ProfileListScreen()),
+          (route) => false,
+        );
+      }
     } on FirebaseAuthException catch (e) {
       String errorMessage = 'ログインに失敗しました';
       
       switch (e.code) {
+        case 'invalid-credential':
         case 'user-not-found':
-          errorMessage = 'ユーザーが見つかりません';
-          break;
         case 'wrong-password':
-          errorMessage = 'パスワードが間違っています';
+          errorMessage = 'メールアドレスまたはパスワードが間違っています';
           break;
         case 'invalid-email':
           errorMessage = 'メールアドレスの形式が正しくありません';
@@ -61,8 +59,11 @@ class _LoginScreenState extends State<LoginScreen> {
         case 'user-disabled':
           errorMessage = 'このアカウントは無効化されています';
           break;
+        case 'too-many-requests':
+          errorMessage = 'しばらく時間を置いてから再度お試しください';
+          break;
         default:
-          errorMessage = 'エラー: ${e.message}';
+          errorMessage = 'ログインエラー: ${e.message}';
       }
       
       if (mounted) {

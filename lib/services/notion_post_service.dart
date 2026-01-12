@@ -1,120 +1,125 @@
 // lib/services/notion_post_service.dart
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:cloud_functions/cloud_functions.dart';
+
 import '../models/post.dart';
-import '../env.dart';
 
+/// Firebase Cloud Functions 経由で Notion DB とやり取りするサービス
+///
+/// セキュリティ上の理由から、Notion API キーはサーバーサイド（Cloud Functions）
+/// でのみ扱い、クライアント側には公開しない設計になっています。
 class NotionPostService {
-  // TODO: あとで .env や dart-define で秘匿する
-  static const String _notionApiBaseUrl = 'https://api.notion.com/v1';
-    // ★ dart-define から受け取った値を使う
-  static const String _notionApiKey = notionApiKey;
-  static const String _databaseId = notionDatabaseId;
+  final FirebaseFunctions _functions;
 
-  static const Map<String, String> _headers = {
-    'Authorization': 'Bearer $_notionApiKey',
-    'Notion-Version': '2022-06-28',
-    'Content-Type': 'application/json',
-  };
+  NotionPostService({FirebaseFunctions? functions})
+      : _functions = functions ?? FirebaseFunctions.instance;
 
-  /// 投稿一覧取得
+  // ---------------------------------------------------------------------------
+  // 一覧取得
+  // ---------------------------------------------------------------------------
+
+  /// Notion DB から投稿一覧を取得
   Future<List<Post>> fetchPosts() async {
-    final url = Uri.parse('$_notionApiBaseUrl/databases/$_databaseId/query');
+    try {
+      final callable = _functions.httpsCallable('getPosts');
+      final result = await callable.call();
 
-    final res = await http.post(url, headers: _headers);
-    if (res.statusCode != 200) {
-      throw Exception('Failed to fetch posts from Notion: ${res.body}');
+      // Map<Object?, Object?> から Map<String, dynamic> への安全な変換
+      final data = Map<String, dynamic>.from(result.data as Map);
+
+      if (data['success'] != true) {
+        throw Exception('Failed to fetch posts: success=false');
+      }
+
+      final postsJson = List<dynamic>.from(data['posts'] as List);
+      return postsJson
+          .map((json) => Post.fromJson(Map<String, dynamic>.from(json as Map)))
+          .toList();
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(
+        'Cloud Function error (${e.code}): ${e.message ?? "Unknown error"}',
+      );
+    } catch (e) {
+      throw Exception('Failed to fetch posts: $e');
     }
-
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    final results = data['results'] as List<dynamic>;
-
-    return results.map((page) => _pageToPost(page)).toList();
   }
 
-  /// 1件取得（詳細用）
+  // ---------------------------------------------------------------------------
+  // 単一取得
+  // ---------------------------------------------------------------------------
+
+  /// 単一のページ(Post) を取得
   Future<Post> fetchPost(String pageId) async {
-    final url = Uri.parse('$_notionApiBaseUrl/pages/$pageId');
+    try {
+      final callable = _functions.httpsCallable('getPost');
+      final result = await callable.call({'pageId': pageId});
 
-    final res = await http.get(url, headers: _headers);
-    if (res.statusCode != 200) {
-      throw Exception('Failed to fetch post: ${res.body}');
-    }
+      // Map<Object?, Object?> から Map<String, dynamic> への安全な変換
+      final data = Map<String, dynamic>.from(result.data as Map);
 
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return _pageToPost(data);
-  }
+      if (data['success'] != true) {
+        throw Exception('Failed to fetch post: success=false');
+      }
 
-  /// 新規作成 or 更新
-  Future<void> upsertPost(Post post, {bool isUpdate = false}) async {
-    final body = {
-      'parent': {'database_id': _databaseId},
-      'properties': {
-        'Title': {
-          'title': [
-            {'text': {'content': post.title}}
-          ]
-        },
-        'PDF': {'url': post.pdfUrl},
-        'Comment': {
-          'rich_text': [
-            {'text': {'content': post.comment}}
-          ]
-        },
-        'Tags': {
-          'multi_select': post.hashtags
-              .map((tag) => {
-                    'name': tag,
-                  })
-              .toList()
-        },
-      },
-    };
-
-    http.Response res;
-
-    if (isUpdate) {
-      final url = Uri.parse('$_notionApiBaseUrl/pages/${post.id}');
-      res = await http.patch(url, headers: _headers, body: jsonEncode(body));
-    } else {
-      final url = Uri.parse('$_notionApiBaseUrl/pages');
-      res = await http.post(url, headers: _headers, body: jsonEncode(body));
-    }
-
-    if (res.statusCode != 200) {
-      throw Exception('Failed to upsert post: ${res.body}');
+      final postJson = Map<String, dynamic>.from(data['post'] as Map);
+      return Post.fromJson(postJson);
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(
+        'Cloud Function error (${e.code}): ${e.message ?? "Unknown error"}',
+      );
+    } catch (e) {
+      throw Exception('Failed to fetch post: $e');
     }
   }
 
-  /// Notionのpage JSON → Postモデル変換
-  Post _pageToPost(Map<String, dynamic> page) {
-    final properties = page['properties'] as Map<String, dynamic>;
+  // ---------------------------------------------------------------------------
+  // 作成 / 更新（upsert）
+  // ---------------------------------------------------------------------------
 
-    final titleProp = properties['Title']?['title'] as List<dynamic>? ?? [];
-    final titleText =
-        titleProp.isNotEmpty ? (titleProp.first['plain_text'] ?? '') : '';
+  /// Post を作成または更新する。
+  ///
+  /// - [isUpdate] が true かつ post.id が空でない → 更新
+  /// - それ以外 → 新規作成
+  /// - [newFileUrls] が指定されている場合、そのURLをNotionに保存する
+  Future<void> upsertPost(
+    Post post, {
+    required bool isUpdate,
+    List<String>? newFileUrls,
+  }) async {
+    try {
+      final callable = _functions.httpsCallable('upsertPost');
 
-    final pdfUrl = properties['PDF']?['url'] as String? ?? '';
+      final payload = <String, dynamic>{
+        'title': post.title,
+        'firstCheck': post.firstCheck,
+        'secondCheck': post.secondCheck,
+        'canvaUrl': post.canvaUrl,
+        'categories': post.categories,
+        'status': post.status,
+      };
 
-    final commentProp =
-        properties['Comment']?['rich_text'] as List<dynamic>? ?? [];
-    final commentText = commentProp.isNotEmpty
-        ? (commentProp.first['plain_text'] as String? ?? '')
-        : '';
+      // 更新時のみ id を含める
+      if (isUpdate && post.id.isNotEmpty) {
+        payload['id'] = post.id;
+      }
 
-    final tagsProp =
-        properties['Tags']?['multi_select'] as List<dynamic>? ?? [];
-    final tags = tagsProp
-        .map((e) => e['name'] as String? ?? '')
-        .where((e) => e.isNotEmpty)
-        .toList();
+      // 新しいファイルURLがある場合は追加
+      if (newFileUrls != null && newFileUrls.isNotEmpty) {
+        payload['fileUrls'] = newFileUrls;
+      }
 
-    return Post(
-      id: page['id'] as String,
-      title: titleText,
-      pdfUrl: pdfUrl,
-      comment: commentText,
-      hashtags: tags,
-    );
+      final result = await callable.call(payload);
+      // Map<Object?, Object?> から Map<String, dynamic> への安全な変換
+      final data = Map<String, dynamic>.from(result.data as Map);
+
+      if (data['success'] != true) {
+        throw Exception('Failed to upsert post: success=false');
+      }
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(
+        'Cloud Function error (${e.code}): ${e.message ?? "Unknown error"}',
+      );
+    } catch (e) {
+      throw Exception('Failed to upsert post: $e');
+    }
   }
 }
