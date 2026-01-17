@@ -46,3 +46,9 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+
+# Firebase configuration files (contain API keys - NEVER commit these)
+**/GoogleService-Info.plist
+**/google-services.json
+lib/firebase_options.dart
+lib/env.dart
