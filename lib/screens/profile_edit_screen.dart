@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'profile_list_screen.dart';
 import 'login_screen.dart';
 
@@ -566,6 +567,31 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 12.0),
                           ),
                           child: const Text('アカウントを削除する'),
+                        ),
+                        const SizedBox(height: 32.0),
+                        // 利用規約・プライバシーポリシーリンク
+                        const Divider(),
+                        ListTile(
+                          leading: const Icon(Icons.description_outlined),
+                          title: const Text('利用規約'),
+                          trailing: const Icon(Icons.open_in_new, size: 18),
+                          onTap: () async {
+                            final url = Uri.parse('https://www.notion.so/2ebaae8f429e80678191e66bfaf3e021');
+                            if (await canLaunchUrl(url)) {
+                              await launchUrl(url, mode: LaunchMode.externalApplication);
+                            }
+                          },
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.privacy_tip_outlined),
+                          title: const Text('プライバシーポリシー'),
+                          trailing: const Icon(Icons.open_in_new, size: 18),
+                          onTap: () async {
+                            final url = Uri.parse('https://www.notion.so/280aae8f429e80578482d0fb96dd3e4c');
+                            if (await canLaunchUrl(url)) {
+                              await launchUrl(url, mode: LaunchMode.externalApplication);
+                            }
+                          },
                         ),
                         const SizedBox(height: 32.0),
                       ],

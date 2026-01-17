@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'profile_edit_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -96,37 +97,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  /// 利用規約ダイアログを表示
-  void _showTermsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('利用規約'),
-        content: const SingleChildScrollView(
-          child: Text(
-            '【EU Med Family 利用規約】\n\n'
-            '1. 禁止事項\n'
-            '・他者を誹謗中傷するコンテンツの投稿\n'
-            '・わいせつ・暴力的なコンテンツの投稿\n'
-            '・虚偽の情報の投稿\n'
-            '・著作権を侵害するコンテンツの投稿\n'
-            '・スパム行為\n\n'
-            '2. コンテンツの管理\n'
-            '運営は不適切なコンテンツを予告なく削除する権利を有します。\n\n'
-            '3. アカウントの停止\n'
-            '利用規約に違反したユーザーのアカウントを停止する場合があります。\n\n'
-            '4. 免責事項\n'
-            'ユーザー間のトラブルについて、運営は責任を負いません。',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('閉じる'),
-          ),
-        ],
-      ),
-    );
+  /// 利用規約をブラウザで開く
+  Future<void> _openTermsOfService() async {
+    final url = Uri.parse('https://www.notion.so/2ebaae8f429e80678191e66bfaf3e021');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('利用規約を開けませんでした')),
+        );
+      }
+    }
   }
 
   @override
@@ -248,7 +230,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   decoration: TextDecoration.underline,
                                 ),
                                 recognizer: TapGestureRecognizer()
-                                  ..onTap = () => _showTermsDialog(),
+                                  ..onTap = () => _openTermsOfService(),
                               ),
                               const TextSpan(
                                 text: 'に同意します（不適切なコンテンツの投稿を禁止します）',
