@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 
 import '../models/post.dart';
 import '../services/notion_post_service.dart';
+import '../services/report_service.dart';
 import 'post_edit_screen.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -44,6 +45,7 @@ Future<void> openPdfFromNotion(String pageId) async {
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
   final _notionService = NotionPostService();
+  final _reportService = ReportService();
   late Future<Post> _futurePost;
   
   // ログインユーザーのNotionユーザーID
@@ -367,6 +369,62 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  /// 通報ダイアログを表示
+  Future<void> _showReportDialog(Post post) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('この投稿を通報しますか？'),
+        content: const Text(
+          '不適切なコンテンツとして運営に報告します。\n悪質な場合は対応いたします。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('通報する'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _submitReport(post);
+    }
+  }
+
+  /// 通報をFirestoreに送信
+  Future<void> _submitReport(Post post) async {
+    try {
+      await _reportService.reportPost(
+        postId: post.id,
+        reportedUserId: post.authorIds.isNotEmpty ? post.authorIds.first : null,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('通報しました。運営が確認します'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceAll('Exception: ', '')),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  }
+
   String _formatDate(DateTime? date) {
     if (date == null) return '';
     return DateFormat('yyyy年MM月dd日').format(date);
@@ -485,6 +543,40 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ),
                             onPressed: () => _goToEdit(post),
                           ),
+                        // 通報メニュー
+                        PopupMenuButton<String>(
+                          icon: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: hasHeaderImage
+                                  ? Colors.black.withOpacity(0.3)
+                                  : Colors.grey[100],
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.more_vert,
+                              size: 20,
+                              color: hasHeaderImage ? Colors.white : Colors.grey[700],
+                            ),
+                          ),
+                          onSelected: (value) {
+                            if (value == 'report') {
+                              _showReportDialog(post);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem<String>(
+                              value: 'report',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.flag_outlined, color: Colors.red, size: 20),
+                                  SizedBox(width: 8),
+                                  Text('通報する', style: TextStyle(color: Colors.red)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
 

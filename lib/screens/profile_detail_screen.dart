@@ -6,6 +6,7 @@ import '../widgets/app_bottom_nav.dart';
 import 'profile_edit_screen.dart';
 import 'post_detail_screen.dart';
 import '../services/notion_post_service.dart';
+import '../services/block_service.dart';
 import '../models/post.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
@@ -36,11 +37,78 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   bool _isUserPostsExpanded = false;
   bool _isLikedPostsExpanded = false;
 
+  // ブロック機能
+  final _blockService = BlockService();
+  bool _isBlocked = false;
+  bool _isLoadingBlockStatus = true;
+
   @override
   void initState() {
     super.initState();
     _loadUserPosts();
     _loadLikedPosts();
+    _loadBlockStatus();
+  }
+
+  /// ブロック状態を読み込む
+  Future<void> _loadBlockStatus() async {
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+    // 自分自身の場合はチェック不要
+    if (currentUserId == null || currentUserId == widget.userId) {
+      setState(() {
+        _isLoadingBlockStatus = false;
+      });
+      return;
+    }
+
+    try {
+      final isBlocked = await _blockService.isUserBlocked(widget.userId);
+      if (mounted) {
+        setState(() {
+          _isBlocked = isBlocked;
+          _isLoadingBlockStatus = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading block status: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingBlockStatus = false;
+        });
+      }
+    }
+  }
+
+  /// ブロック/ブロック解除を切り替え
+  Future<void> _toggleBlock() async {
+    try {
+      if (_isBlocked) {
+        await _blockService.unblockUser(widget.userId);
+      } else {
+        await _blockService.blockUser(widget.userId);
+      }
+
+      if (mounted) {
+        setState(() {
+          _isBlocked = !_isBlocked;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isBlocked ? 'ブロックしました' : 'ブロックを解除しました'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('エラー: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _loadLikedPosts() async {
@@ -789,6 +857,32 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 ),
                 
                 const SizedBox(height: 24),
+                
+                // ブロックボタン（他人のプロフィールの場合のみ表示）
+                if (!isOwnProfile && !_isLoadingBlockStatus)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _toggleBlock,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _isBlocked ? Colors.grey : Colors.red,
+                          side: BorderSide(
+                            color: _isBlocked ? Colors.grey : Colors.red,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        icon: Icon(
+                          _isBlocked ? Icons.person_add : Icons.block,
+                          size: 20,
+                        ),
+                        label: Text(
+                          _isBlocked ? 'ブロックを解除する' : 'このユーザーをブロックする',
+                        ),
+                      ),
+                    ),
+                  ),
                 
                 // Notion連携セクション（自分のプロフィールの場合のみ表示）
                 if (isOwnProfile)
