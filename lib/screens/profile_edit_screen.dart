@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'profile_list_screen.dart';
+import 'login_screen.dart';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({Key? key}) : super(key: key);
@@ -241,6 +242,97 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
+  /// アカウント削除確認ダイアログを表示
+  Future<void> _showDeleteAccountDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('アカウントを削除しますか？'),
+        content: const Text(
+          'この操作は取り消せません。アカウントを削除すると、すべてのユーザーデータ（プロフィール、投稿履歴など）が完全に削除されます。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('削除する'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteAccount();
+    }
+  }
+
+  /// アカウント削除処理
+  Future<void> _deleteAccount() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ログインしていません')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final uid = currentUser.uid;
+
+      // 1. Firestoreデータを先に削除（権限エラー防止のため）
+      await FirebaseFirestore.instance.collection('users').doc(uid).delete();
+
+      // 2. Firebase Authアカウントを削除
+      await currentUser.delete();
+
+      // 3. ログイン画面へ遷移（全画面を破棄）
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('アカウントを削除しました')),
+        );
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String errorMessage = 'アカウントの削除に失敗しました';
+
+      if (e.code == 'requires-recent-login') {
+        errorMessage = 'セキュリティ保護のため、一度ログアウトして再ログインしてから実行してください';
+      } else {
+        errorMessage = 'エラー: ${e.message}';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMessage)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('エラーが発生しました: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   Widget _buildImageHeader() {
     return SizedBox(
       height: 200,
@@ -460,6 +552,20 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ),
                           maxLines: 5,
                           enabled: !_isLoading,
+                        ),
+                        const SizedBox(height: 32.0),
+                        
+                        // アカウント削除セクション
+                        const Divider(),
+                        const SizedBox(height: 24.0),
+                        OutlinedButton(
+                          onPressed: _isLoading ? null : _showDeleteAccountDialog,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(vertical: 12.0),
+                          ),
+                          child: const Text('アカウントを削除する'),
                         ),
                         const SizedBox(height: 32.0),
                       ],
