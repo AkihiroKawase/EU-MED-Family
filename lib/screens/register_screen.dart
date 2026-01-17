@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'profile_edit_screen.dart';
-import 'profile_list_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -16,6 +16,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _isLoading = false;
+  bool _agreedToTerms = false; // 利用規約同意チェックボックス
 
   @override
   void dispose() {
@@ -93,6 +94,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
       }
     }
+  }
+
+  /// 利用規約ダイアログを表示
+  void _showTermsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('利用規約'),
+        content: const SingleChildScrollView(
+          child: Text(
+            '【EU Med Family 利用規約】\n\n'
+            '1. 禁止事項\n'
+            '・他者を誹謗中傷するコンテンツの投稿\n'
+            '・わいせつ・暴力的なコンテンツの投稿\n'
+            '・虚偽の情報の投稿\n'
+            '・著作権を侵害するコンテンツの投稿\n'
+            '・スパム行為\n\n'
+            '2. コンテンツの管理\n'
+            '運営は不適切なコンテンツを予告なく削除する権利を有します。\n\n'
+            '3. アカウントの停止\n'
+            '利用規約に違反したユーザーのアカウントを停止する場合があります。\n\n'
+            '4. 免責事項\n'
+            'ユーザー間のトラブルについて、運営は責任を負いません。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -182,9 +216,54 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     return null;
                   },
                 ),
+                const SizedBox(height: 16.0),
+                // 利用規約同意チェックボックス
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Checkbox(
+                      value: _agreedToTerms,
+                      onChanged: _isLoading
+                          ? null
+                          : (value) {
+                              setState(() {
+                                _agreedToTerms = value ?? false;
+                              });
+                            },
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 12.0),
+                        child: RichText(
+                          text: TextSpan(
+                            style: TextStyle(
+                              color: Colors.grey[700],
+                              fontSize: 14,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: '利用規約',
+                                style: const TextStyle(
+                                  color: Colors.teal,
+                                  decoration: TextDecoration.underline,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () => _showTermsDialog(),
+                              ),
+                              const TextSpan(
+                                text: 'に同意します（不適切なコンテンツの投稿を禁止します）',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 24.0),
                 ElevatedButton(
-                  onPressed: _isLoading ? null : _register,
+                  // チェックボックスがOFFの場合は登録ボタンを無効化
+                  onPressed: (_isLoading || !_agreedToTerms) ? null : _register,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16.0),
                   ),

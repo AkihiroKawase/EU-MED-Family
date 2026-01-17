@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/post.dart';
 import '../services/notion_post_service.dart';
+import '../services/block_service.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'post_detail_screen.dart';
 import 'post_edit_screen.dart';
@@ -15,17 +16,38 @@ class PostListScreen extends StatefulWidget {
 
 class _PostListScreenState extends State<PostListScreen> {
   final _notionService = NotionPostService();
+  final _blockService = BlockService();
   late Future<List<Post>> _futurePosts;
+  List<String> _blockedUserIds = [];
 
   String? _selectedCategory; // null = すべて
 
   @override
   void initState() {
     super.initState();
+    // まずfuturePostsを初期化（buildが呼ばれる前に）
     _futurePosts = _notionService.fetchPosts();
+    // ブロックリストはバックグラウンドで取得
+    _loadBlockedUsers();
+  }
+
+  Future<void> _loadBlockedUsers() async {
+    try {
+      // NotionユーザーIDでフィルタリングするため、getBlockedNotionUserIdsを使用
+      final blockedIds = await _blockService.getBlockedNotionUserIds();
+      if (mounted) {
+        setState(() {
+          _blockedUserIds = blockedIds;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading blocked users: $e');
+    }
   }
 
   Future<void> _reload() async {
+    // ブロックリストも再取得（NotionユーザーID）
+    _blockedUserIds = await _blockService.getBlockedNotionUserIds();
     setState(() {
       _futurePosts = _notionService.fetchPosts();
     });
@@ -69,10 +91,29 @@ class _PostListScreenState extends State<PostListScreen> {
     return list;
   }
 
-  // --- 選択カテゴリで絞り込み ---
+  // --- 選択カテゴリとブロックで絞り込み ---
   List<Post> _filterPosts(List<Post> posts) {
-    if (_selectedCategory == null) return posts;
-    return posts.where((p) => _normalizeCategory(p) == _selectedCategory).toList();
+    var filtered = posts;
+    
+    // ブロックしたユーザーの投稿を除外
+    if (_blockedUserIds.isNotEmpty) {
+      filtered = filtered.where((p) {
+        // authorIdsのいずれかがブロックリストに含まれている場合は除外
+        for (final authorId in p.authorIds) {
+          if (_blockedUserIds.contains(authorId)) {
+            return false;
+          }
+        }
+        return true;
+      }).toList();
+    }
+    
+    // カテゴリフィルター
+    if (_selectedCategory != null) {
+      filtered = filtered.where((p) => _normalizeCategory(p) == _selectedCategory).toList();
+    }
+    
+    return filtered;
   }
 
   @override
